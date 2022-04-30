@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<feed  version="1.0" hasPendingRequests="false" >
+  <company></company>
+  <status>200</status>
+  <errmsg>OK</errmsg>
+  <interval>0</interval>
+    <entry type="predatasource">
+        <version>1505749679</version>
+        <name>HP Server Fan-</name>
+        <displayedas>Fan-</displayedas>
+        <description></description>
+        <collector>snmp</collector>
+        <hasMultiInstances>true</hasMultiInstances>
+        <schedule>180</schedule>
+        <appliesTo>hasCategory(&#34;snmp&#34;) &#38;&#38; Servers()</appliesTo>
+        <wildcardauto>true</wildcardauto>
+        <wildcardpersist>false</wildcardpersist>
+        <wildcardlinuxscript>ad_snmp</wildcardlinuxscript>
+        <wildcardlinuxcmdline> type=&#34;wildcard&#34; oid=&#34;.1.3.6.1.4.1.232.6.2.6.7.1.2&#34;  descOid=&#34;&#34; oid2=&#34;&#34;  </wildcardlinuxcmdline>
+        <wildcardwinscript>ad_snmp</wildcardwinscript>
+        <wildcardwincmdline> type=&#34;wildcard&#34; oid=&#34;.1.3.6.1.4.1.232.6.2.6.7.1.2&#34;  descOid=&#34;&#34; oid2=&#34;&#34;  </wildcardwincmdline>
+        <wildcardgroovyscript></wildcardgroovyscript>
+        <wildcardschedule>0</wildcardschedule>
+        <wildcarddisable>false</wildcarddisable>
+        <wildcarddeleteinactive>false</wildcarddeleteinactive>
+        <agdmethod>none</agdmethod>
+        <agdparams></agdparams>
+        <group>HP Health</group>
+        <tags>fan,hp,health,hardware</tags>
+        <technology></technology>
+        <adlist><![CDATA[{"agdmethod":"none","method":"ad_snmp","agdparams":"","id":0,"filters":[],"params":{"descOid":"","oid":".1.3.6.1.4.1.232.6.2.6.7.1.2","ILP":"[]","oid2":"","type":"wildcard"}}]]></adlist>
+        <schemaVersion>2</schemaVersion>
+        <dataSourceType>1</dataSourceType>
+        <attributes>
+        <attribute>
+            <name>ip</name>
+            <value>dns</value>
+            <comment></comment>
+        </attribute>
+        </attributes>
+        <datapoints>
+        <datapoint>
+            <name>Status</name>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>none</postprocessormethod>
+            <postprocessorparam></postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr>= 3 4</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject>Fan is not OK</alertsubject>
+            <alertbody>Fan ##DSIDESCRIPTION## on host ##HOST## reports code ##VALUE##, which means:
+
+3-degraded 
+4-failed</alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>other(1)
+Fan status detection is not supported by this system or driver.
+ok(2)
+The fan is operating properly.
+degraded(2)
+A redundant fan is not operating properly.
+failed(4)
+A non-redundant fan is not operating properly.</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <userparam1>.1.3.6.1.4.1.232.6.2.6.7.1.9.##WILDVALUE##</userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>5</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        </datapoints>
+        <graphs>
+        <graph>
+            <name>Fan Status</name>
+            <title>Fan Status</title>
+            <verticallabel>code</verticallabel>
+            <rigid>true</rigid>
+            <maxvalue>NaN</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>1</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>Status</name>
+            <datapointname>Status</datapointname>
+            <cf>1</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>1</type>
+                <legend>1-other 2-OK 3-degraded 4-failed</legend>
+                <color>blue</color>
+                <datapointname>Status</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        </graphs>
+        <overviewgraphs>
+        </overviewgraphs>
+        <scripts>
+        </scripts>
+    </entry>
+</feed>

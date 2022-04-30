@@ -1,0 +1,319 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<feed  version="1.0" hasPendingRequests="false" >
+  <company></company>
+  <status>200</status>
+  <errmsg>OK</errmsg>
+  <interval>0</interval>
+    <entry type="predatasource">
+        <version>1505749679</version>
+        <name>HP Server Chassis Status-</name>
+        <displayedas>Chassis Status</displayedas>
+        <description></description>
+        <collector>snmp</collector>
+        <hasMultiInstances>true</hasMultiInstances>
+        <schedule>180</schedule>
+        <appliesTo>hasCategory(&#34;snmp&#34;) &#38;&#38; Servers()</appliesTo>
+        <wildcardauto>true</wildcardauto>
+        <wildcardpersist>false</wildcardpersist>
+        <wildcardlinuxscript>ad_snmp</wildcardlinuxscript>
+        <wildcardlinuxcmdline> type=&#34;value&#34; oid=&#34;.1.3.6.1.4.1.232.2.2.4.6&#34;  descOid=&#34;&#34; oid2=&#34;&#34;  </wildcardlinuxcmdline>
+        <wildcardwinscript>ad_snmp</wildcardwinscript>
+        <wildcardwincmdline> type=&#34;value&#34; oid=&#34;.1.3.6.1.4.1.232.2.2.4.6&#34;  descOid=&#34;&#34; oid2=&#34;&#34;  </wildcardwincmdline>
+        <wildcardgroovyscript></wildcardgroovyscript>
+        <wildcardschedule>0</wildcardschedule>
+        <wildcarddisable>false</wildcarddisable>
+        <wildcarddeleteinactive>false</wildcarddeleteinactive>
+        <agdmethod>none</agdmethod>
+        <agdparams></agdparams>
+        <group>HP Health</group>
+        <tags>hp,health,chassis,hardware</tags>
+        <technology></technology>
+        <adlist><![CDATA[{"agdmethod":"none","method":"ad_snmp","agdparams":"","id":0,"filters":[],"params":{"descOid":"","oid":".1.3.6.1.4.1.232.2.2.4.6","ILP":"[]","oid2":"","type":"value"}}]]></adlist>
+        <schemaVersion>2</schemaVersion>
+        <dataSourceType>1</dataSourceType>
+        <attributes>
+        <attribute>
+            <name>ip</name>
+            <value>dns</value>
+            <comment></comment>
+        </attribute>
+        </attributes>
+        <datapoints>
+        <datapoint>
+            <name>CpuFan</name>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>none</postprocessormethod>
+            <postprocessorparam></postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr>= 3 4</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject>CPU fan on ##HOST## is not OK</alertsubject>
+            <alertbody>CPU fan on ##HOST## reports code ##VALUE##, which means:
+
+3-degraded 
+4-failed</alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>The status of the processor fan(s) in the system.
+This value will be one of the following:
+other(1)
+Fan status detection is not supported by this system or driver.
+ok(2)
+All fans are operating properly.
+failed(4)
+A fan is not operating properly.
+The system will be shutdown if the failed(4) condition occurs.</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <userparam1>.1.3.6.1.4.1.232.6.2.6.5.0</userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>5</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>MemoryStatus</name>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>none</postprocessormethod>
+            <postprocessorparam></postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr>= 3 4</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject>RAM (memory) status of ##HOST## is not OK</alertsubject>
+            <alertbody>RAM (memory) status of ##HOST## is code ##VALUE##, which means:
+
+3-degraded 
+4-failed</alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>This value specifies the overall condition of Memory Object.</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <userparam1>.1.3.6.1.4.1.232.19.2.4.1.0</userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>5</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>SystemFan</name>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>none</postprocessormethod>
+            <postprocessorparam></postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr>= 3 4</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject>System fan on ##HOST## is not OK</alertsubject>
+            <alertbody>System fan on ##HOST## reports code ##VALUE##, which means:
+
+3-degraded 
+4-failed</alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>The status of the fan(s) in the system.
+This value will be one of the following:
+other(1)
+Fan status detection is not supported by this system or driver.
+ok(2)
+All fans are operating properly.
+degraded(3)
+A non-required fan is not operating properly.
+failed(4)
+A required fan is not operating properly.
+If the cpqHeThermalDegradedAction is set to shutdown(3) the
+system will be shutdown if the failed(4) condition occurs.</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <userparam1>.1.3.6.1.4.1.232.6.2.6.4.0</userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>5</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>TempStatus</name>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>none</postprocessormethod>
+            <postprocessorparam></postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr>= 3 4</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject>Thermal state of ##HOST## is not OK</alertsubject>
+            <alertbody>Thermal state of ##HOST## is code ##VALUE##, which means:
+
+3-degraded 
+4-failed</alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>The status of the system&#39;s temperature sensors:
+other(1)
+Temp sensing is not supported by this system or driver.
+ok(2)
+All temp sensors are within normal operating range.
+degraded(3)
+A temp sensor is outside of normal operating range.
+failed(4)
+A temp sensor detects a condition that could permanently
+damage the system.
+The system will automatically shutdown if the failed(4) condition
+results, so it is unlikely that this value will ever be returned
+by the agent.  If the cpqHeThermalDegradedAction is set to
+shutdown(3) the system will be shutdown if the degraded(3)
+condition occurs.</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <userparam1>.1.3.6.1.4.1.232.6.2.6.3.0</userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>5</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        </datapoints>
+        <graphs>
+        <graph>
+            <name>CPU Fan Status</name>
+            <title>CPU Fan Status</title>
+            <verticallabel>code</verticallabel>
+            <rigid>true</rigid>
+            <maxvalue>5.0</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>1</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>CpuFan</name>
+            <datapointname>CpuFan</datapointname>
+            <cf>1</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>1</type>
+                <legend>1-other 2-OK 3-degraded 4-failed</legend>
+                <color>blue</color>
+                <datapointname>CpuFan</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        <graph>
+            <name>Memory Status</name>
+            <title>Memory Status</title>
+            <verticallabel>code</verticallabel>
+            <rigid>true</rigid>
+            <maxvalue>NaN</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>1</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>MemoryStatus</name>
+            <datapointname>MemoryStatus</datapointname>
+            <cf>1</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>1</type>
+                <legend>1-other 2-OK 3-degraded 4-failed</legend>
+                <color>blue</color>
+                <datapointname>MemoryStatus</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        <graph>
+            <name>System Fan Status</name>
+            <title>System Fan Status</title>
+            <verticallabel>code</verticallabel>
+            <rigid>true</rigid>
+            <maxvalue>5.0</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>1</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>SystemFan</name>
+            <datapointname>SystemFan</datapointname>
+            <cf>1</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>1</type>
+                <legend>1-other 2-OK 3-degraded 4-failed</legend>
+                <color>blue</color>
+                <datapointname>SystemFan</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        <graph>
+            <name>Thermal Status</name>
+            <title>Thermal Status</title>
+            <verticallabel>code</verticallabel>
+            <rigid>true</rigid>
+            <maxvalue>5.0</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>1</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>TempStatus</name>
+            <datapointname>TempStatus</datapointname>
+            <cf>1</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>1</type>
+                <legend>1-other 2-OK 3-degraded 4-failed</legend>
+                <color>blue</color>
+                <datapointname>TempStatus</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        </graphs>
+        <overviewgraphs>
+        </overviewgraphs>
+        <scripts>
+        </scripts>
+    </entry>
+</feed>

@@ -1,0 +1,345 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<feed  version="1.0" hasPendingRequests="false" >
+  <company></company>
+  <status>200</status>
+  <errmsg>OK</errmsg>
+  <interval>0</interval>
+    <entry type="predatasource">
+        <version>1538344909</version>
+        <name>_Windows patches needed</name>
+        <displayedas>_Windows patches needed</displayedas>
+        <description>By Mike Suding. Shows patches needed. By default the classifications shown are Critical Updates, Definition Updates, Security Updates, Security-only Updates, Updates. You can override this if you set a property &#39;windows.patch_classifications&#39; and the value is a comma delimited list.</description>
+        <collector>batchscript</collector>
+        <hasMultiInstances>true</hasMultiInstances>
+        <schedule>86400</schedule>
+        <appliesTo>isWindows()</appliesTo>
+        <wildcardauto>true</wildcardauto>
+        <wildcardpersist>false</wildcardpersist>
+        <wildcardlinuxscript>ad_script</wildcardlinuxscript>
+        <wildcardlinuxcmdline>type=&#34;powerShell&#34; </wildcardlinuxcmdline>
+        <wildcardwinscript>ad_script</wildcardwinscript>
+        <wildcardwincmdline>type=&#34;powerShell&#34; </wildcardwincmdline>
+        <wildcardgroovyscript>$TargetHostName = &#39;##SYSTEM.SYSNAME##&#39;
+$CollectorHostName = $env:computername
+$TargetUserName = &#39;##wmi.user##&#39;
+$TargetPassword = &#39;##wmi.pass##&#39;
+$SearchedUpdateStr = &#39;##windows.patch_classifications##&#39;
+$DebugMode = $false
+
+#if property absent, set default value
+If ($SearchedUpdateStr -Match &#34;windows.patch_classifications&#34;)
+{
+    $SearchedUpdateStr = &#39;Critical Updates, Definition Updates, Security Updates, Security-only Updates, Updates&#39;
+}
+
+$ScriptBlock = {
+    #Parameters: search categories and debug mode
+    param ([String]$SearchedUpdateCategory,[bool]$Debug)
+
+    #Convert category to array, separator is comma, removed spaces
+    $SearchedUpdateList = $SearchedUpdateCategory.Split(&#34;,&#34;).Trim()
+
+    Try
+    {
+        #Time of start update search
+        $StartTime = Get-Date
+
+        #Start searching updates
+        $Searcher = New-Object -ComObject Microsoft.Update.Searcher
+        $Updates = $Searcher.Search(&#34;IsHidden=0 and IsInstalled=0&#34;).Updates
+
+        #Counter of unmarked updates, need for ID of instances
+        [int]$CounterOfUnmarkedUpdates = 0
+
+        Foreach ($Update in $Updates)
+        {
+            #If debug enabled, print collected info about driver
+            If ($Debug)
+            {
+                Write-Host &#34;[DEBUG]Update discovered:&#34;
+                $Update.Title
+                Write-Host &#34;[DEBUG]KB:&#34;
+                $Update.KBArticleIDs.Item(0)
+                Write-Host &#34;[DEBUG]Categories:&#34;
+                $Update.Categories
+                Write-Host &#34;[DEBUG]MSRCseverity:&#34;
+                $Update.MsrcSeverity
+            }
+
+            $UpdateCategory = ($Update.Categories | Where-Object {$_.Type -eq &#34;UpdateClassification&#34;}).Name
+            If ($UpdateCategory -in $SearchedUpdateList)
+            {
+                #If update has KB index - read it, if no - created index &#34;UP&#34; and counter
+                If ($Update.KBArticleIDs.Count)
+                {
+                    $UpdateKbIndex = $(&#34;KB&#34; + $Update.KBArticleIDs.Item(0))
+                }
+                Else
+                {
+                    $UpdateKbIndex = $(&#34;UP&#34; + $CounterOfUnmarkedUpdates.ToString())
+                    $CounterOfUnmarkedUpdates++
+                }
+
+                #Output - kb index, title, and group; Remove KB index from end of title
+                $UpdateKbTitle = $Update.Title.Replace($UpdateKbIndex,&#34;&#34;).Replace(&#34;  &#34;,&#34; &#34;).Replace(&#34;()&#34;,&#34;&#34;)
+
+                #if update hasn&#39;t severity field, pull unspicified
+                If ($Update.MsrcSeverity)
+                {
+                    $Result_MsrcSeverity = $Update.MsrcSeverity
+                }
+                else
+                {
+                    $Result_MsrcSeverity = &#34;unspecified&#34;
+                }
+                Write-Host &#34;$UpdateKbIndex##$($UpdateKbIndex): $($UpdateKbTitle)######group=$UpdateCategory&#38;auto.MSRCseverity=$Result_MsrcSeverity&#34;
+            }
+        }
+
+        #Finish Time and total time of execution
+        $FinishTime = Get-Date
+        $TimeDiffSeconds = (New-TimeSpan -Start $StartTime -End $FinishTime).Seconds
+
+        #Output summary object
+        Write-Host &#34;Update_Summary##Update Summary######auto.patches_detection_ran=$StartTime - took $TimeDiffSeconds seconds&#34;
+
+    }
+    Catch
+    {
+        #In case of error - create new instance with error description
+        Write-Host &#34;ERROR##$($_.FullyQualifiedErrorId): $($_.Exception.Message)&#34;
+    }
+}
+
+#if target host matches with computer name - dont invoke remote session
+if ($TargetHostName -eq $CollectorHostName)
+{
+    Invoke-Command -ScriptBlock $ScriptBlock -ArgumentList @($SearchedUpdateStr,$DebugMode)
+}
+else
+{
+    #If WMI creds empty - invoke remote command without creds, if not - create credential object and use it for authorization
+    if ($TargetUserName -Match &#34;wmi.user&#34; -and $TargetPassword -Match &#34;wmi.pass&#34;)
+    {
+        Invoke-Command -ComputerName $TargetHostName -ScriptBlock $ScriptBlock -ArgumentList @($SearchedUpdateStr,$DebugMode)
+    }
+    else
+    {
+        $TargetCredentials = New-Object System.Management.Automation.PSCredential ($TargetUserName, $(ConvertTo-SecureString $TargetPassword -AsPlainText -Force))
+        Invoke-Command -ComputerName $TargetHostName -ScriptBlock $ScriptBlock -Credential $TargetCredentials -ArgumentList @($SearchedUpdateStr,$DebugMode)
+    }
+}
+exit 0</wildcardgroovyscript>
+        <wildcardschedule>1440</wildcardschedule>
+        <wildcarddisable>false</wildcarddisable>
+        <wildcarddeleteinactive>true</wildcarddeleteinactive>
+        <agdmethod>ilp</agdmethod>
+        <agdparams>group</agdparams>
+        <group></group>
+        <tags></tags>
+        <technology>Other classifications: Update rollups, Monthly Rollups, Preview of Monthly Rollups, Drivers, Service packs, Feature packs, Tools, Servicing Stack Updates (SSU)</technology>
+        <adlist><![CDATA[{"agdmethod":"ilp","method":"ad_script","agdparams":"group","id":0,"filters":[],"params":{"type":"powerShell","groovyscript":"$TargetHostName = '##SYSTEM.SYSNAME##'\r\n$CollectorHostName = $env:computername\r\n$TargetUserName = '##wmi.user##'\r\n$TargetPassword = '##wmi.pass##'\r\n$SearchedUpdateStr = '##windows.patch_classifications##'\r\n$DebugMode = $false\r\n\r\n#if property absent, set default value\r\nIf ($SearchedUpdateStr -Match \"windows.patch_classifications\")\r\n{\r\n    $SearchedUpdateStr = 'Critical Updates, Definition Updates, Security Updates, Security-only Updates, Updates'\r\n}\r\n\r\n$ScriptBlock = {\r\n    #Parameters: search categories and debug mode\r\n    param ([String]$SearchedUpdateCategory,[bool]$Debug)\r\n\r\n    #Convert category to array, separator is comma, removed spaces\r\n    $SearchedUpdateList = $SearchedUpdateCategory.Split(\",\").Trim()\r\n\r\n    Try\r\n    {\r\n        #Time of start update search\r\n        $StartTime = Get-Date\r\n\r\n        #Start searching updates\r\n        $Searcher = New-Object -ComObject Microsoft.Update.Searcher\r\n        $Updates = $Searcher.Search(\"IsHidden=0 and IsInstalled=0\").Updates\r\n\r\n        #Counter of unmarked updates, need for ID of instances\r\n        [int]$CounterOfUnmarkedUpdates = 0\r\n\r\n        Foreach ($Update in $Updates)\r\n        {\r\n            #If debug enabled, print collected info about driver\r\n            If ($Debug)\r\n            {\r\n                Write-Host \"[DEBUG]Update discovered:\"\r\n                $Update.Title\r\n                Write-Host \"[DEBUG]KB:\"\r\n                $Update.KBArticleIDs.Item(0)\r\n                Write-Host \"[DEBUG]Categories:\"\r\n                $Update.Categories\r\n                Write-Host \"[DEBUG]MSRCseverity:\"\r\n                $Update.MsrcSeverity\r\n            }\r\n\r\n            $UpdateCategory = ($Update.Categories | Where-Object {$_.Type -eq \"UpdateClassification\"}).Name\r\n            If ($UpdateCategory -in $SearchedUpdateList)\r\n            {\r\n                #If update has KB index - read it, if no - created index \"UP\" and counter\r\n                If ($Update.KBArticleIDs.Count)\r\n                {\r\n                    $UpdateKbIndex = $(\"KB\" + $Update.KBArticleIDs.Item(0))\r\n                }\r\n                Else\r\n                {\r\n                    $UpdateKbIndex = $(\"UP\" + $CounterOfUnmarkedUpdates.ToString())\r\n                    $CounterOfUnmarkedUpdates++\r\n                }\r\n\r\n                #Output - kb index, title, and group; Remove KB index from end of title\r\n                $UpdateKbTitle = $Update.Title.Replace($UpdateKbIndex,\"\").Replace(\"  \",\" \").Replace(\"()\",\"\")\r\n\r\n                #if update hasn't severity field, pull unspicified\r\n                If ($Update.MsrcSeverity)\r\n                {\r\n                    $Result_MsrcSeverity = $Update.MsrcSeverity\r\n                }\r\n                else\r\n                {\r\n                    $Result_MsrcSeverity = \"unspecified\"\r\n                }\r\n                Write-Host \"$UpdateKbIndex##$($UpdateKbIndex): $($UpdateKbTitle)######group=$UpdateCategory&auto.MSRCseverity=$Result_MsrcSeverity\"\r\n            }\r\n        }\r\n\r\n        #Finish Time and total time of execution\r\n        $FinishTime = Get-Date\r\n        $TimeDiffSeconds = (New-TimeSpan -Start $StartTime -End $FinishTime).Seconds\r\n\r\n        #Output summary object\r\n        Write-Host \"Update_Summary##Update Summary######auto.patches_detection_ran=$StartTime - took $TimeDiffSeconds seconds\"\r\n\r\n    }\r\n    Catch\r\n    {\r\n        #In case of error - create new instance with error description\r\n        Write-Host \"ERROR##$($_.FullyQualifiedErrorId): $($_.Exception.Message)\"\r\n    }\r\n}\r\n\r\n#if target host matches with computer name - dont invoke remote session\r\nif ($TargetHostName -eq $CollectorHostName)\r\n{\r\n    Invoke-Command -ScriptBlock $ScriptBlock -ArgumentList @($SearchedUpdateStr,$DebugMode)\r\n}\r\nelse\r\n{\r\n    #If WMI creds empty - invoke remote command without creds, if not - create credential object and use it for authorization\r\n    if ($TargetUserName -Match \"wmi.user\" -and $TargetPassword -Match \"wmi.pass\")\r\n    {\r\n        Invoke-Command -ComputerName $TargetHostName -ScriptBlock $ScriptBlock -ArgumentList @($SearchedUpdateStr,$DebugMode)\r\n    }\r\n    else\r\n    {\r\n        $TargetCredentials = New-Object System.Management.Automation.PSCredential ($TargetUserName, $(ConvertTo-SecureString $TargetPassword -AsPlainText -Force))\r\n        Invoke-Command -ComputerName $TargetHostName -ScriptBlock $ScriptBlock -Credential $TargetCredentials -ArgumentList @($SearchedUpdateStr,$DebugMode)\r\n    }\r\n}\r\nexit 0"}}]]></adlist>
+        <schemaVersion>2</schemaVersion>
+        <dataSourceType>1</dataSourceType>
+        <attributes>
+        <attribute>
+            <name>scripttype</name>
+            <value>powerShell</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>scriptgroovy</name>
+            <value>#BatchScript; show results for summary object
+#Get info about last instalation of patches
+#Calculate days, if updates are not installed on system - write 0, if error - write -1
+
+$TargetHostName = &#39;##SYSTEM.SYSNAME##&#39;
+$CollectorHostName = $env:computername
+$TargetUserName = &#39;##wmi.user##&#39;
+$TargetPassword = &#39;##wmi.pass##&#39;
+$SearchedUpdateStr = &#39;##windows.patch_classifications##&#39;
+$DebugMode = $false
+
+#if property absent, set default value
+If (-not $SearchedUpdateStr)
+{
+    $SearchedUpdateStr = &#39;Critical Updates, Definition Updates, Security Updates, Security-only Updates, Updates&#39;
+}
+
+$ScriptBlock = {
+    #Parameters: search categories and debug mode
+    param ([String]$SearchedUpdateCategory,[bool]$Debug)
+
+    #Convert category to array, separator is comma, remove spaces
+    $SearchedUpdateList = $SearchedUpdateCategory.Split(&#34;,&#34;).Trim()
+
+    #Obtaining last update installation day, calculate days difference
+    Try
+    {
+        $LastPatch = Get-WmiObject -ComputerName &#34;localhost&#34; Win32_Quickfixengineering | Select-Object @{Name=&#34;InstalledOn&#34;;Expression={$_.InstalledOn -as [datetime]}} | Sort-Object -Property InstalledOn | Select-Object -Property InstalledOn -Last 1
+        if ($LastPatch)
+        {
+            $DayDiff = $(New-TimeSpan $LastPatch.InstalledOn $(Get-Date)).Days
+        }
+        else
+        {
+            $DayDiff = 0
+        }
+    }
+    Catch
+    {
+        $DayDiff = -1
+    }
+    Write-Host &#34;Update_Summary.LastPatch=$($DayDiff)&#34;
+
+    #Perform update search, filter according to categories, write counts of updates
+    Try
+    {
+        $Searcher = New-Object -ComObject Microsoft.Update.Searcher
+        $Updates = $Searcher.Search(&#34;IsHidden=0 and IsInstalled=0&#34;).Updates
+        $FilteredUpdates = $Updates | Where-Object {($_.Categories | Where-Object {$_.Type -eq &#34;UpdateClassification&#34;}).Name -in $SearchedUpdateList}
+        $DiscoveredUpdates = $FilteredUpdates.Count
+        
+        #If debug, write info about discovered updates
+        If ($Debug)
+        {
+            Foreach ($Update in $Updates)
+            {
+                Write-Host &#34;[DEBUG]Update discovered:&#34;
+                $Update.Title
+                Write-Host &#34;[DEBUG]KB:&#34;
+                $Update.KBArticleIDs.Item(0)
+                Write-Host &#34;[DEBUG]Categories:&#34;
+                $Update.Categories
+                Write-Host &#34;[DEBUG]MSRCseverity:&#34;
+                $Update.MsrcSeverity
+            }
+        }
+
+    }
+    Catch
+    {
+        #In case of error - out -1 as result
+        $DiscoveredUpdates = -1
+    }
+    Write-Host &#34;Update_Summary.UpdatesCount=$($DiscoveredUpdates)&#34;
+}
+
+#if target host matches the computer name - dont invoke remote session
+if ($TargetHostName -eq $CollectorHostName)
+{
+    Invoke-Command -ScriptBlock $ScriptBlock -ArgumentList @($SearchedUpdateStr,$DebugMode)
+}
+else
+{
+    #If WMI creds empty - invoke remote command without creds, if not - create credential object and use it for authorization
+    if ($TargetUserName -and $TargetPassword)
+    {
+        $TargetCredentials = New-Object System.Management.Automation.PSCredential ($TargetUserName, $(ConvertTo-SecureString $TargetPassword -AsPlainText -Force))
+        Invoke-Command -ComputerName $TargetHostName -ScriptBlock $ScriptBlock -Credential $TargetCredentials -ArgumentList @($SearchedUpdateStr,$DebugMode)
+    }
+    else
+    {
+        Invoke-Command -ComputerName $TargetHostName -ScriptBlock $ScriptBlock -ArgumentList @($SearchedUpdateStr,$DebugMode)
+    }
+}
+exit 0</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>windowsscript</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>linuxscript</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>windowscmdline</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>linuxcmdline</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        </attributes>
+        <datapoints>
+        <datapoint>
+            <name>DaysSinceLastPatch</name>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##wildvalue##.LastPatch</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <description></description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>UpdatesCount</name>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##wildvalue##.UpdatesCount</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <description></description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>milliseconds_it_took</name>
+            <dataType>4</dataType>
+            <type>2</type>
+            <postprocessormethod>none</postprocessormethod>
+            <postprocessorparam></postprocessorparam>
+            <usevalue>responseTime</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <description></description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        </datapoints>
+        <graphs>
+        </graphs>
+        <overviewgraphs>
+        </overviewgraphs>
+        <scripts>
+        </scripts>
+    </entry>
+</feed>

@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<feed  version="1.0" hasPendingRequests="false" >
+  <company></company>
+  <status>200</status>
+  <errmsg>OK</errmsg>
+  <interval>0</interval>
+    <entry type="predatasource">
+        <version>1572018252</version>
+        <name>HP Physical Drives_copy-</name>
+        <displayedas>HP Physical Drives_copy-</displayedas>
+        <description></description>
+        <collector>snmp</collector>
+        <hasMultiInstances>true</hasMultiInstances>
+        <schedule>300</schedule>
+        <appliesTo>/*To prevent this clone from associating with hosts before you made necessary change, we comment out the original appliesTo.*/
+/*
+hasCategory(&#34;snmp&#34;) &#38;&#38; Servers()
+*/
+false()</appliesTo>
+        <wildcardauto>true</wildcardauto>
+        <wildcardpersist>false</wildcardpersist>
+        <wildcardlinuxscript>ad_snmp</wildcardlinuxscript>
+        <wildcardlinuxcmdline> type=&#34;wildcard&#34; oid=&#34;.1.3.6.1.4.1.232.3.2.5.1.1.2&#34;  descOid=&#34;.1.3.6.1.4.1.232.3.2.5.1.1.64&#34; oid2=&#34;&#34;  </wildcardlinuxcmdline>
+        <wildcardwinscript>ad_snmp</wildcardwinscript>
+        <wildcardwincmdline> type=&#34;wildcard&#34; oid=&#34;.1.3.6.1.4.1.232.3.2.5.1.1.2&#34;  descOid=&#34;.1.3.6.1.4.1.232.3.2.5.1.1.64&#34; oid2=&#34;&#34;  </wildcardwincmdline>
+        <wildcardgroovyscript></wildcardgroovyscript>
+        <wildcardschedule>0</wildcardschedule>
+        <wildcarddisable>false</wildcarddisable>
+        <wildcarddeleteinactive>false</wildcarddeleteinactive>
+        <agdmethod>none</agdmethod>
+        <agdparams></agdparams>
+        <group>HP Health</group>
+        <tags>hp,health,storage,drive</tags>
+        <technology></technology>
+        <adlist><![CDATA[{"agdmethod":"none","method":"ad_snmp","agdparams":"","id":0,"filters":[],"params":{"descOid":".1.3.6.1.4.1.232.3.2.5.1.1.64","ad_param_externalresourceid":"","oid":".1.3.6.1.4.1.232.3.2.5.1.1.2","ILP":"[]","oid2":"","type":"wildcard","ad_param_externalresourcetype":""}}]]></adlist>
+        <schemaVersion>2</schemaVersion>
+        <dataSourceType>1</dataSourceType>
+        <attributes>
+        <attribute>
+            <name>ip</name>
+            <value>dns</value>
+            <comment></comment>
+        </attribute>
+        </attributes>
+        <datapoints>
+        <datapoint>
+            <name>SmartStatus</name>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>none</postprocessormethod>
+            <postprocessorparam></postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr>= 3</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject>Drive failed</alertsubject>
+            <alertbody>Drive ##DSIDESCRIPTION## on host ##HOST## has failed SMART tests, and should be replaced.</alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Physical Drive S.M.A.R.T Status.
+The following values are defined:
+other(1)
+The agent is unable to determine if the status of S.M.A.R.T
+predictive failure monitoring for this drive.
+ok(2)
+Indicates the drive is functioning properly.
+replaceDrive(3)
+Indicates that the drive has a S.M.A.R.T predictive failure
+error and should be replaced.</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <userparam1>.1.3.6.1.4.1.232.3.2.5.1.1.57.##WILDVALUE##</userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>Status</name>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>none</postprocessormethod>
+            <postprocessorparam></postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr>= 4 3</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject>Drive failed</alertsubject>
+            <alertbody>The drive in controller/slot ##DSIDESCRIPTION## on ##HOST## has failed with code ##VALUE##, which means:
+
+3 - Failed
+Indicates that the drive is no longer operating and
+should be replaced.
+
+4 - Predictive Failure
+Indicates that the drive has a predictive failure error and
+should be replaced.
+
+This started at ##START## - or ##DURATION## ago.</alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Physical Drive Status.
+This shows the status of the physical drive.
+The following values are valid for the physical drive status:
+Other (1)
+Indicates that the instrument agent does not recognize
+the drive.  You may need to upgrade your instrument agent
+and/or driver software.
+Ok (2)
+Indicates the drive is functioning properly.
+Failed (3)
+Indicates that the drive is no longer operating and
+should be replaced.
+Predictive Failure(4)
+Indicates that the drive has a predictive failure error and
+should be replaced.
+Erasing(5)
+Indicates that the drive is being erased.
+Erase Done(6)
+Indicates that the drive has been erased and is now in an
+offline state.
+Erase Queued(7)
+Indicates that an erase operation is currently queued for
+the drive.</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <userparam1>.1.3.6.1.4.1.232.3.2.5.1.1.6.##WILDVALUE##</userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        </datapoints>
+        <graphs>
+        <graph>
+            <name>SMART Status</name>
+            <title>SMART Status</title>
+            <verticallabel>code</verticallabel>
+            <rigid>true</rigid>
+            <maxvalue>NaN</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>1</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>SmartStatus</name>
+            <datapointname>SmartStatus</datapointname>
+            <cf>1</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>1</type>
+                <legend>1-other, 2-OK, 3-replaceDrive</legend>
+                <color>blue</color>
+                <datapointname>SmartStatus</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        <graph>
+            <name>Status</name>
+            <title>Status</title>
+            <verticallabel>2 = OK; 3= failed; 4 = pred. failure</verticallabel>
+            <rigid>true</rigid>
+            <maxvalue>NaN</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>1</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>Status</name>
+            <datapointname>Status</datapointname>
+            <cf>1</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>1</type>
+                <legend>1-other 2-OK 3-failed 4-predictive failure 5-erasing 6-erase done 7-erase queued</legend>
+                <color>blue</color>
+                <datapointname>Status</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        </graphs>
+        <overviewgraphs>
+        </overviewgraphs>
+        <scripts>
+        </scripts>
+    </entry>
+</feed>

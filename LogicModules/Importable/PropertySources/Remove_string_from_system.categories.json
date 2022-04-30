@@ -1,0 +1,46 @@
+{
+    "scheduleOption": 0,
+    "dataType": 0,
+    "description": "Set the systemcat = \"vr46\";  to the string to be removed from the system.categories property\n\nrequires api.user, api.pass, and account to be defined.",
+    "appliesTo": "false()",
+    "technology": "",
+    "type": "propertyrule",
+    "params": [
+        {
+            "name": "linuxcmdline",
+            "comment": "",
+            "value": ""
+        },
+        {
+            "name": "linuxscript",
+            "comment": "",
+            "value": ""
+        },
+        {
+            "name": "scriptgroovy",
+            "comment": "",
+            "value": "import org.apache.http.HttpEntity\nimport org.apache.http.client.methods.CloseableHttpResponse\nimport org.apache.http.client.methods.HttpPut\nimport org.apache.http.impl.client.CloseableHttpClient\nimport org.apache.http.impl.client.HttpClients\nimport org.apache.http.util.EntityUtils\nimport javax.crypto.Mac;\nimport javax.crypto.spec.SecretKeySpec;\nimport org.apache.commons.codec.binary.Hex;\nimport org.apache.http.entity.ContentType;\nimport org.apache.http.entity.StringEntity;\n\n\nsystemcat = \"vr46\";\n//get host props\ndevid = hostProps.get(\"system.deviceid\");\ncate = hostProps.get(\"system.categories\");\n\n//remove category from string\ncate = cate.minus(systemcat);\ncate = cate.replaceAll(\",,\",\",\");\n\n//check if \",\" is first char and remove if needed\nif (cate.startsWith(\",\")) {\n\tcate = cate.substring(1);\n\t\n} \nprintln cate\n\n//make the API call to update the string\n\n//Account Info\ndef accessId = hostProps.get(\"api.user\");\ndef accessKey = hostProps.get(\"api.pass\");\ndef account = hostProps.get(\"api.account\");\ndef data = '{\"value\":\"'+cate+'\"}';\ndef resourcePath = \"/device/devices/\"+devid+\"/properties/system.categories\";\ndef url = \"https://\" + account + \".logicmonitor.com\" + \"/santaba/rest\" + resourcePath;\n\nStringEntity params = new StringEntity(data,ContentType.APPLICATION_JSON);\n\n//get current time\nepoch = System.currentTimeMillis();\nrequestVars = \"PUT\" + epoch + data + resourcePath;\n// construct signature\nhmac = Mac.getInstance(\"HmacSHA256\");\nsecret = new SecretKeySpec(accessKey.getBytes(), \"HmacSHA256\");\nhmac.init(secret);\nhmac_signed = Hex.encodeHexString(hmac.doFinal(requestVars.getBytes()));\nsignature = hmac_signed.bytes.encodeBase64();\n\n// HTTP PUT\nCloseableHttpClient httpclient = HttpClients.createDefault();\nhttp_request = new HttpPut(url);\nhttp_request.addHeader(\"Authorization\" , \"LMv1 \" + accessId + \":\" + signature + \":\" + epoch);\nhttp_request.setHeader(\"Accept\", \"application/json\");\nhttp_request.setHeader(\"Content-type\", \"application/json\");\nhttp_request.setEntity(params);\nresponse = httpclient.execute(http_request);\nresponseBody = EntityUtils.toString(response.getEntity());\ncode = response.getStatusLine().getStatusCode();\n\n// Print Response\nprintln \"Status:\" + code;\nprintln \"Response body:\" + responseBody;\nhttpclient.close();"
+        },
+        {
+            "name": "scripttype",
+            "comment": "embed",
+            "value": "embed"
+        },
+        {
+            "name": "windowscmdline",
+            "comment": "",
+            "value": ""
+        },
+        {
+            "name": "windowsscript",
+            "comment": "",
+            "value": ""
+        }
+    ],
+    "version": 1594762524,
+    "tags": "",
+    "auditVersion": 0,
+    "name": "Remove string from system.categories",
+    "id": 15,
+    "group": "LMPS"
+}

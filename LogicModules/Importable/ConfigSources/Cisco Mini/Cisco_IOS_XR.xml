@@ -1,0 +1,563 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<feed  version="1.0" hasPendingRequests="false" >
+  <company></company>
+  <status>200</status>
+  <errmsg>OK</errmsg>
+  <interval>0</interval>
+    <entry type="predatasource">
+        <version>1598371365</version>
+        <name>Cisco_IOS_XR</name>
+        <displayedas>IOS Configs XR</displayedas>
+        <description>Various Cisco IOS device configurations and information.</description>
+        <collector>script</collector>
+        <hasMultiInstances>true</hasMultiInstances>
+        <schedule>3600</schedule>
+        <appliesTo>system.sysinfo=~&#34;Cisco IOS XR&#34; 
+&#38;&#38; ((ssh.user &#38;&#38; ssh.pass ) || (config.user &#38;&#38; config.pass))</appliesTo>
+        <wildcardauto>true</wildcardauto>
+        <wildcardpersist>true</wildcardpersist>
+        <wildcardlinuxscript>ad_script</wildcardlinuxscript>
+        <wildcardlinuxcmdline>type=&#34;embeded&#34; </wildcardlinuxcmdline>
+        <wildcardwinscript>ad_script</wildcardwinscript>
+        <wildcardwincmdline>type=&#34;embeded&#34; </wildcardwincmdline>
+        <wildcardgroovyscript>/*******************************************************************************
+ * © 2007-2020 - LogicMonitor, Inc.  All rights reserved.
+ ******************************************************************************/
+import com.santaba.agent.util.compress.GZipCompressor
+import com.santaba.agent.groovyapi.expect.Expect
+
+def host = hostProps.get(&#34;system.hostname&#34;)
+def teln = hostProps.get(&#34;configsource.use.telnet&#34;).toString().toBoolean()
+def user = hostProps.get(&#34;ssh.user&#34;) ?: hostProps.get(&#34;config.user&#34;)
+def pass = hostProps.get(&#34;ssh.pass&#34;) ?: hostProps.get(&#34;config.pass&#34;)
+def epas = hostProps.get(&#34;ssh.enable.pass&#34;) ?: hostProps.get(&#34;config.enable.pass&#34;) ?: pass
+def admn = hostProps.get(&#34;ssh.admin&#34;) ?: &#34;false&#34;
+def port = teln ? (hostProps.get(&#34;configsource.telnet.port&#34;) ?: &#34;23&#34;) : (hostProps.get(&#34;ssh.port&#34;) ?: &#34;22&#34;)
+
+// Basic mode is used for devices that freeze on formatting or privilege commands.
+def basicMode = hostProps.get(&#34;system.sysinfo&#34;).contains(&#34;Cisco Firepower Threat Defense&#34;)
+
+// These are the commands we will check for. Found ones will become our instances.
+def desiredCommands = [&#34;running-config&#34;, &#34;startup-config&#34;, &#34;version&#34;, &#34;inventory&#34;]
+
+// The command list can be overwritten via this property.
+if(hostProps[&#34;configsource.desired.commands&#34;]) {
+	desiredCommands = hostProps[&#34;configsource.desired.commands&#34;].split(&#34;,&#34;).collect { it.trim() }
+}
+
+// All of these commands can be used to format various devices. We may want to only add when certain sysinfo are matched if failing causes problems.
+// Example: hostProps.get(&#34;system.sysinfo&#34;).matches(&#34;.*Cisco.*(Adaptive Security Appliance|ASA).*&#34;)
+def formattingCommands = []
+formattingCommands.push(&#34;term len 0&#34;)			// Cisco Router/Switches
+formattingCommands.push(&#34;terminal width 0&#34;)		// Cisco Router/Switches
+formattingCommands.push(&#34;terminal length 0&#34;)	// Cisco Router/Switches
+formattingCommands.push(&#34;screen-width 0&#34;)		// Cisco Junos &#38; Others
+formattingCommands.push(&#34;screen-length 0&#34;)		// Cisco Junos &#38; Others
+formattingCommands.push(&#34;config paging disable&#34;)// Cisco Wireless LAN Controller
+formattingCommands.push(&#34;terminal pager 0&#34;)		// Cisco ASA Firewall
+formattingCommands.push(&#34;terminal datadump&#34;)	// Cisco Managed Switches
+
+def cli
+def smallBufferSize = 1024 // The size of the buffer used when making minor modifications to the terminal.
+def largeBufferSize = 1024 * 64 // The size of the buffer used when reading the bulk of the config.
+def processReadTime = 120 // The seconds spent waiting for a command or process to return before buffer consumption stops.
+def maxPages = 50 // The maximum pages we will wait for.
+
+def success = false
+def formattingSuccessful = false
+
+def error = &#34;&#34;
+
+// This prompt regex is designed to pass a gauntlet of unusual prompts collected over the years.
+def rawPrompt = /(?-m)[^\n]+\s?[&#62;#$]\s*$/
+
+// We remove common characters used to decorate a terminal or provide interaction information.
+def termClean = /((?i)\x1b+\[\??(\d+[hjklnr]?(;\d*[hjklnr])?))*/
+def moreMatch = &#34;\\s?&#60;?-+\\s*More\\s*-+&#62;?\\s?&#34;
+
+// CLI based approaches fail often. We make up to 10 attempts to connect and retrieve a single byte of data.
+def retries = 0
+while(retries &#60;= 5 &#38;&#38; !success) {
+	try {
+		cli = teln ? Expect.open(host, port.toInteger(), processReadTime) : Expect.open(host, port.toInteger(), user, pass, processReadTime)
+		success = waitForOutput(cli, 30000) // Wait for a single byte of information
+	}
+ 	catch (ex) {
+		sleep(1000)
+		error += &#34;[Connection Attempt ${retries}] ${ex.message}\n&#34;
+	}
+
+	retries++
+}
+
+if(success) {
+	try {
+		// At this point we are ready to check for a prompt, but don&#39;t know if the device has finished sending data.
+		// We wait until the output is stable. Staggered/Delayed data is reasonably common.
+		waitForStableOutput(cli, 300)
+		
+		if(cli.stdout().trim().readLines().last() =~ /[Uu]?ser\s?[Nn]ame\s?:|[Pp]?assword\s?:/) {
+            // Consume the prompt up to our authentication line and put it into cli.matched()
+			cli.expect([/[Uu]?ser\s?[Nn]ame\s?:/, /[Pp]?assword\s?:/] as String[], smallBufferSize)
+
+			if(cli.matched() =~ /[Uu]?ser\s?[Nn]ame\s?:/) {
+				cli.send(&#34;${user}\n&#34;)
+				cli.expect(&#34;[Pp]?assword:&#34;, smallBufferSize)
+			}
+
+			if(cli.matched() =~ /[Pp]?assword\s?:/) {
+				cli.send(&#34;${pass}\n&#34;)
+			}
+
+			waitForStableOutput(cli, 100)
+		}
+
+		// Now the data is stable, the standard output should have everything we need to gather a prompt.
+		def stdPrompt = cli.stdout() =~ rawPrompt.bitwiseNegate()
+		def prompt = &#34;&#34;
+
+		if(stdPrompt.size()) {
+			// We&#39;ve got our best guess at a prompt at this point. Clean it and get it ready for line matching.
+			prompt = &#34;^\\s*${termClean}${stdPrompt[0].trim().replaceAll(termClean,&#39;&#39;).trim().replaceAll(/[.*+?^()|\[\]\\{}$]/, &#39;\\\\$0&#39;)}&#34;
+
+			// Consume the buffer until we reach the prompt so we know we have a clean buffer to work with for future matches (avoiding race conditions).
+			cli.expect(prompt, smallBufferSize)
+		}
+		else {
+			// We didn&#39;t find a prompt in the standard output. Use expect to wait for one.
+			cli.expect(rawPrompt, smallBufferSize)
+			prompt = &#34;^\\s*${cli.matched().replaceAll(termClean,&#39;&#39;).trim().replaceAll(/[.*+?^()|\[\]\\{}$]/, &#39;\\\\$0&#39;)}&#34;
+		}
+
+		if(!basicMode) {
+			// The enable command will elevate the prompt if possible.
+			cli.send(&#34;enable\n&#34;)
+			cli.expect([&#34;(?i)password:&#34;, &#34;${prompt[0..-2]}[&#62;#\$]&#34;, prompt] as String[], smallBufferSize)
+
+			if(cli.matched().toLowerCase().contains(&#34;password&#34;)) {
+				cli.send(&#34;${epas}\n&#34;)
+				cli.expect(rawPrompt, smallBufferSize)
+			}
+
+			// The enable command may have changed the prompt. We&#39;ve got to get it again.
+			prompt = &#34;^${cli.matched().replaceAll(termClean,&#39;&#39;).trim().replaceAll(/[.*+?^()|\[\]\\{}$]/, &#39;\\\\$0&#39;)}&#34;
+			
+			// We aren&#39;t in basic mode so try and configure the terminal to avoid pagination with both variations of the width and length commands.
+			formattingCommands.each { command-&#62;
+				cli.send(&#34;${command}\n&#34;)
+
+				cli.expect(prompt, smallBufferSize)
+				if(cli.before().trim().readLines().size() &#60;= 1) {
+					formattingSuccessful = true
+				}
+			}
+
+			if(admn.toLowerCase().contains(&#34;true&#34;)) {
+				// Attempt to enter admin mode if requested.
+				cli.send(&#34;admin\n&#34;)
+				cli.expect(rawPrompt, smallBufferSize)
+				prompt = &#34;^.?${cli.matched().replaceAll(termClean,&#39;&#39;).trim().replaceAll(/[.*+?^()|\[\]\\{}$]/, &#39;\\\\$0&#39;)}&#34;
+			}
+		}
+
+		// At this point, all initialization is complete.
+
+		// Execute the show command for this instance. If we don&#39;t have a formatted terminal we add spaces to postpone a prompt being returned.
+		cli.send(formattingSuccessful ? &#34;show ?\n&#34; : &#34;show ?${&#39; &#39; * maxPages}\n&#34;);
+
+		// As we sometimes need to paginate the returned data, we will concatenate the output in a buffer.
+		def buffer = &#34;&#34;
+
+		// We loop throught all potential pages up to the limit set by &#34;maxPages&#34; (a default of 50 was double the ammount needed for anything in testing).
+		for(int i = 0; i &#60; maxPages; i++) {
+			cli.expect(&#34;${prompt}|${moreMatch}&#34;, largeBufferSize)
+
+			// Attempt to clean the output of unwanted information, specifically backspace characters and the --More-- decoration.
+			buffer += cli.before().replaceAll(&#34;(\b+\\s*\b+)|(${moreMatch})&#34;,&#34;&#34;)
+
+			if(cli.matched().matches(moreMatch)) {
+				// We hit a page break. Send many new line characters to greatly reduce the chance of an early prompt being returned (one is not reliable).
+				cli.send(&#34;${&#39; &#39; * maxPages}\n&#34;)
+			} else {
+				// We matched the prompt and have to assume we&#39;ve gotten everything. We are unable to continue pagination even with more new line characters.
+				break
+			}
+			
+			if(i == maxPages - 1) {
+				throw new Exception(&#34;Pagination Failed: Max pages reached.&#34;)
+			}
+		}
+
+        def output = buffer.trim()
+
+		output.eachLine{ line-&#62;
+			desiredCommands.each { command-&#62;
+				def tokens = line.trim().tokenize()
+				if(tokens[0] == command) {
+					println &#34;${tokens[0]}##${tokens[0]}##${tokens[1] ? tokens[1..-1].join(&#39; &#39;) : &#39;&#39;}&#34;
+				}
+			}
+		}
+	} catch (ex) {
+		error += &#34;[Collecting] ${ex.message}\n&#34;
+		success = false
+	}
+
+	try {
+		// We always try to exit. Add an extra exit if we might be in privilege mode.
+		cli.send(&#34;exit\n&#34; * (basicMode ? 2 : 1))
+		cli.close()
+	}
+	catch(ex) {
+		error += &#34;[Closing] ${ex.message}\n&#34;
+		success = false
+	}
+}
+
+if(!success) {
+	error += cli ? &#34;--- CLI Output ---\n${(cli.stdout().length() &#62; 512 ? &#34;...${cli.stdout().drop(cli.stdout().length() - 512)}&#34; : cli.stdout())}\n&#34; : &#34;&#34;
+	error += cli ? &#34;--- CLI Base64 ---\n${GZipCompressor.INSTANCE.compress(cli.stdout().bytes).encodeBase64().toString()}\n&#34; : &#34;&#34;
+	println &#34;--- Error Logs ---\n${error}&#34;
+	//new File(&#34;../logs/Cisco_IOS_AD ${host.replaceAll(&#39;[^a-zA-Z0-9-_\\.]&#39;, &#39;_&#39;)}.txt&#34;).write(error)
+	return 1
+}
+
+return 0
+
+def waitForStableOutput(cli, requiredStability) {
+	def outputStability = 0
+	def lastLength = -1
+
+	while(outputStability &#60; requiredStability) {
+		outputStability += (cli.stdout().length() == lastLength) ? 1 : -outputStability
+		lastLength = cli.stdout().length()
+		sleep(10)
+	}	
+}
+
+def waitForOutput(cli, timeout) {
+	def start = System.currentTimeMillis()
+
+	while(!cli.stdout()) {
+		if(System.currentTimeMillis() - start &#62; timeout) {
+			return false
+		}
+		sleep(1)
+	}
+
+	return true
+}</wildcardgroovyscript>
+        <wildcardschedule>0</wildcardschedule>
+        <wildcarddisable>false</wildcarddisable>
+        <wildcarddeleteinactive>false</wildcarddeleteinactive>
+        <agdmethod>none</agdmethod>
+        <agdparams></agdparams>
+        <group></group>
+        <tags>ios,cisco,network,hardware</tags>
+        <technology>- credentials must be set in ssh.user and ssh.pass.
+- ssh.admin can be set to true to use admin mode
+- user must log directly into PRIV EXEC mode</technology>
+        <adlist><![CDATA[{"agdmethod":"none","method":"ad_script","agdparams":"","id":0,"filters":[],"params":{"type":"embeded","groovyscript":"/*******************************************************************************\n * © 2007-2020 - LogicMonitor, Inc.  All rights reserved.\n ******************************************************************************/\nimport com.santaba.agent.util.compress.GZipCompressor\nimport com.santaba.agent.groovyapi.expect.Expect\n\ndef host = hostProps.get(\"system.hostname\")\ndef teln = hostProps.get(\"configsource.use.telnet\").toString().toBoolean()\ndef user = hostProps.get(\"ssh.user\") ?: hostProps.get(\"config.user\")\ndef pass = hostProps.get(\"ssh.pass\") ?: hostProps.get(\"config.pass\")\ndef epas = hostProps.get(\"ssh.enable.pass\") ?: hostProps.get(\"config.enable.pass\") ?: pass\ndef admn = hostProps.get(\"ssh.admin\") ?: \"false\"\ndef port = teln ? (hostProps.get(\"configsource.telnet.port\") ?: \"23\") : (hostProps.get(\"ssh.port\") ?: \"22\")\n\n// Basic mode is used for devices that freeze on formatting or privilege commands.\ndef basicMode = hostProps.get(\"system.sysinfo\").contains(\"Cisco Firepower Threat Defense\")\n\n// These are the commands we will check for. Found ones will become our instances.\ndef desiredCommands = [\"running-config\", \"startup-config\", \"version\", \"inventory\"]\n\n// The command list can be overwritten via this property.\nif(hostProps[\"configsource.desired.commands\"]) {\n\tdesiredCommands = hostProps[\"configsource.desired.commands\"].split(\",\").collect { it.trim() }\n}\n\n// All of these commands can be used to format various devices. We may want to only add when certain sysinfo are matched if failing causes problems.\n// Example: hostProps.get(\"system.sysinfo\").matches(\".*Cisco.*(Adaptive Security Appliance|ASA).*\")\ndef formattingCommands = []\nformattingCommands.push(\"term len 0\")\t\t\t// Cisco Router/Switches\nformattingCommands.push(\"terminal width 0\")\t\t// Cisco Router/Switches\nformattingCommands.push(\"terminal length 0\")\t// Cisco Router/Switches\nformattingCommands.push(\"screen-width 0\")\t\t// Cisco Junos & Others\nformattingCommands.push(\"screen-length 0\")\t\t// Cisco Junos & Others\nformattingCommands.push(\"config paging disable\")// Cisco Wireless LAN Controller\nformattingCommands.push(\"terminal pager 0\")\t\t// Cisco ASA Firewall\nformattingCommands.push(\"terminal datadump\")\t// Cisco Managed Switches\n\ndef cli\ndef smallBufferSize = 1024 // The size of the buffer used when making minor modifications to the terminal.\ndef largeBufferSize = 1024 * 64 // The size of the buffer used when reading the bulk of the config.\ndef processReadTime = 120 // The seconds spent waiting for a command or process to return before buffer consumption stops.\ndef maxPages = 50 // The maximum pages we will wait for.\n\ndef success = false\ndef formattingSuccessful = false\n\ndef error = \"\"\n\n// This prompt regex is designed to pass a gauntlet of unusual prompts collected over the years.\ndef rawPrompt = /(?-m)[^\\n]+\\s?[>#$]\\s*$/\n\n// We remove common characters used to decorate a terminal or provide interaction information.\ndef termClean = /((?i)\\x1b+\\[\\??(\\d+[hjklnr]?(;\\d*[hjklnr])?))*/\ndef moreMatch = \"\\\\s?<?-+\\\\s*More\\\\s*-+>?\\\\s?\"\n\n// CLI based approaches fail often. We make up to 10 attempts to connect and retrieve a single byte of data.\ndef retries = 0\nwhile(retries <= 5 && !success) {\n\ttry {\n\t\tcli = teln ? Expect.open(host, port.toInteger(), processReadTime) : Expect.open(host, port.toInteger(), user, pass, processReadTime)\n\t\tsuccess = waitForOutput(cli, 30000) // Wait for a single byte of information\n\t}\n \tcatch (ex) {\n\t\tsleep(1000)\n\t\terror += \"[Connection Attempt ${retries}] ${ex.message}\\n\"\n\t}\n\n\tretries++\n}\n\nif(success) {\n\ttry {\n\t\t// At this point we are ready to check for a prompt, but don't know if the device has finished sending data.\n\t\t// We wait until the output is stable. Staggered/Delayed data is reasonably common.\n\t\twaitForStableOutput(cli, 300)\n\t\t\n\t\tif(cli.stdout().trim().readLines().last() =~ /[Uu]?ser\\s?[Nn]ame\\s?:|[Pp]?assword\\s?:/) {\n            // Consume the prompt up to our authentication line and put it into cli.matched()\n\t\t\tcli.expect([/[Uu]?ser\\s?[Nn]ame\\s?:/, /[Pp]?assword\\s?:/] as String[], smallBufferSize)\n\n\t\t\tif(cli.matched() =~ /[Uu]?ser\\s?[Nn]ame\\s?:/) {\n\t\t\t\tcli.send(\"${user}\\n\")\n\t\t\t\tcli.expect(\"[Pp]?assword:\", smallBufferSize)\n\t\t\t}\n\n\t\t\tif(cli.matched() =~ /[Pp]?assword\\s?:/) {\n\t\t\t\tcli.send(\"${pass}\\n\")\n\t\t\t}\n\n\t\t\twaitForStableOutput(cli, 100)\n\t\t}\n\n\t\t// Now the data is stable, the standard output should have everything we need to gather a prompt.\n\t\tdef stdPrompt = cli.stdout() =~ rawPrompt.bitwiseNegate()\n\t\tdef prompt = \"\"\n\n\t\tif(stdPrompt.size()) {\n\t\t\t// We've got our best guess at a prompt at this point. Clean it and get it ready for line matching.\n\t\t\tprompt = \"^\\\\s*${termClean}${stdPrompt[0].trim().replaceAll(termClean,'').trim().replaceAll(/[.*+?^()|\\[\\]\\\\{}$]/, '\\\\\\\\$0')}\"\n\n\t\t\t// Consume the buffer until we reach the prompt so we know we have a clean buffer to work with for future matches (avoiding race conditions).\n\t\t\tcli.expect(prompt, smallBufferSize)\n\t\t}\n\t\telse {\n\t\t\t// We didn't find a prompt in the standard output. Use expect to wait for one.\n\t\t\tcli.expect(rawPrompt, smallBufferSize)\n\t\t\tprompt = \"^\\\\s*${cli.matched().replaceAll(termClean,'').trim().replaceAll(/[.*+?^()|\\[\\]\\\\{}$]/, '\\\\\\\\$0')}\"\n\t\t}\n\n\t\tif(!basicMode) {\n\t\t\t// The enable command will elevate the prompt if possible.\n\t\t\tcli.send(\"enable\\n\")\n\t\t\tcli.expect([\"(?i)password:\", \"${prompt[0..-2]}[>#\\$]\", prompt] as String[], smallBufferSize)\n\n\t\t\tif(cli.matched().toLowerCase().contains(\"password\")) {\n\t\t\t\tcli.send(\"${epas}\\n\")\n\t\t\t\tcli.expect(rawPrompt, smallBufferSize)\n\t\t\t}\n\n\t\t\t// The enable command may have changed the prompt. We've got to get it again.\n\t\t\tprompt = \"^${cli.matched().replaceAll(termClean,'').trim().replaceAll(/[.*+?^()|\\[\\]\\\\{}$]/, '\\\\\\\\$0')}\"\n\t\t\t\n\t\t\t// We aren't in basic mode so try and configure the terminal to avoid pagination with both variations of the width and length commands.\n\t\t\tformattingCommands.each { command->\n\t\t\t\tcli.send(\"${command}\\n\")\n\n\t\t\t\tcli.expect(prompt, smallBufferSize)\n\t\t\t\tif(cli.before().trim().readLines().size() <= 1) {\n\t\t\t\t\tformattingSuccessful = true\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tif(admn.toLowerCase().contains(\"true\")) {\n\t\t\t\t// Attempt to enter admin mode if requested.\n\t\t\t\tcli.send(\"admin\\n\")\n\t\t\t\tcli.expect(rawPrompt, smallBufferSize)\n\t\t\t\tprompt = \"^.?${cli.matched().replaceAll(termClean,'').trim().replaceAll(/[.*+?^()|\\[\\]\\\\{}$]/, '\\\\\\\\$0')}\"\n\t\t\t}\n\t\t}\n\n\t\t// At this point, all initialization is complete.\n\n\t\t// Execute the show command for this instance. If we don't have a formatted terminal we add spaces to postpone a prompt being returned.\n\t\tcli.send(formattingSuccessful ? \"show ?\\n\" : \"show ?${' ' * maxPages}\\n\");\n\n\t\t// As we sometimes need to paginate the returned data, we will concatenate the output in a buffer.\n\t\tdef buffer = \"\"\n\n\t\t// We loop throught all potential pages up to the limit set by \"maxPages\" (a default of 50 was double the ammount needed for anything in testing).\n\t\tfor(int i = 0; i < maxPages; i++) {\n\t\t\tcli.expect(\"${prompt}|${moreMatch}\", largeBufferSize)\n\n\t\t\t// Attempt to clean the output of unwanted information, specifically backspace characters and the --More-- decoration.\n\t\t\tbuffer += cli.before().replaceAll(\"(\\b+\\\\s*\\b+)|(${moreMatch})\",\"\")\n\n\t\t\tif(cli.matched().matches(moreMatch)) {\n\t\t\t\t// We hit a page break. Send many new line characters to greatly reduce the chance of an early prompt being returned (one is not reliable).\n\t\t\t\tcli.send(\"${' ' * maxPages}\\n\")\n\t\t\t} else {\n\t\t\t\t// We matched the prompt and have to assume we've gotten everything. We are unable to continue pagination even with more new line characters.\n\t\t\t\tbreak\n\t\t\t}\n\t\t\t\n\t\t\tif(i == maxPages - 1) {\n\t\t\t\tthrow new Exception(\"Pagination Failed: Max pages reached.\")\n\t\t\t}\n\t\t}\n\n        def output = buffer.trim()\n\n\t\toutput.eachLine{ line->\n\t\t\tdesiredCommands.each { command->\n\t\t\t\tdef tokens = line.trim().tokenize()\n\t\t\t\tif(tokens[0] == command) {\n\t\t\t\t\tprintln \"${tokens[0]}##${tokens[0]}##${tokens[1] ? tokens[1..-1].join(' ') : ''}\"\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t} catch (ex) {\n\t\terror += \"[Collecting] ${ex.message}\\n\"\n\t\tsuccess = false\n\t}\n\n\ttry {\n\t\t// We always try to exit. Add an extra exit if we might be in privilege mode.\n\t\tcli.send(\"exit\\n\" * (basicMode ? 2 : 1))\n\t\tcli.close()\n\t}\n\tcatch(ex) {\n\t\terror += \"[Closing] ${ex.message}\\n\"\n\t\tsuccess = false\n\t}\n}\n\nif(!success) {\n\terror += cli ? \"--- CLI Output ---\\n${(cli.stdout().length() > 512 ? \"...${cli.stdout().drop(cli.stdout().length() - 512)}\" : cli.stdout())}\\n\" : \"\"\n\terror += cli ? \"--- CLI Base64 ---\\n${GZipCompressor.INSTANCE.compress(cli.stdout().bytes).encodeBase64().toString()}\\n\" : \"\"\n\tprintln \"--- Error Logs ---\\n${error}\"\n\t//new File(\"../logs/Cisco_IOS_AD ${host.replaceAll('[^a-zA-Z0-9-_\\\\.]', '_')}.txt\").write(error)\n\treturn 1\n}\n\nreturn 0\n\ndef waitForStableOutput(cli, requiredStability) {\n\tdef outputStability = 0\n\tdef lastLength = -1\n\n\twhile(outputStability < requiredStability) {\n\t\toutputStability += (cli.stdout().length() == lastLength) ? 1 : -outputStability\n\t\tlastLength = cli.stdout().length()\n\t\tsleep(10)\n\t}\t\n}\n\ndef waitForOutput(cli, timeout) {\n\tdef start = System.currentTimeMillis()\n\n\twhile(!cli.stdout()) {\n\t\tif(System.currentTimeMillis() - start > timeout) {\n\t\t\treturn false\n\t\t}\n\t\tsleep(1)\n\t}\n\n\treturn true\n}"}}]]></adlist>
+        <schemaVersion>2</schemaVersion>
+        <dataSourceType>2</dataSourceType>
+        <attributes>
+        <attribute>
+            <name>scripttype</name>
+            <value>embed</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>scriptgroovy</name>
+            <value>/*******************************************************************************
+ * © 2007-2020 - LogicMonitor, Inc.  All rights reserved.
+ ******************************************************************************/
+import com.santaba.agent.util.compress.GZipCompressor
+import com.santaba.agent.groovyapi.expect.Expect
+
+def host = hostProps.get(&#34;system.hostname&#34;)
+def teln = hostProps.get(&#34;configsource.use.telnet&#34;).toString().toBoolean()
+def user = hostProps.get(&#34;ssh.user&#34;) ?: hostProps.get(&#34;config.user&#34;)
+def pass = hostProps.get(&#34;ssh.pass&#34;) ?: hostProps.get(&#34;config.pass&#34;)
+def epas = hostProps.get(&#34;ssh.enable.pass&#34;) ?: hostProps.get(&#34;config.enable.pass&#34;) ?: pass
+def admn = hostProps.get(&#34;ssh.admin&#34;) ?: &#34;false&#34;
+def port = teln ? (hostProps.get(&#34;configsource.telnet.port&#34;) ?: &#34;23&#34;) : (hostProps.get(&#34;ssh.port&#34;) ?: &#34;22&#34;)
+
+def wild = instanceProps.get(&#34;wildvalue&#34;)
+
+// This is the limit on the size of a config (and the message used).
+def maxString = &#34;\n...Data Truncated...&#34;
+def maxLength = 3145728 - maxString.size() - System.lineSeparator().size()
+
+// Basic mode is used for devices that freeze on formatting or privilege commands.
+def basicMode = hostProps.get(&#34;system.sysinfo&#34;).contains(&#34;Cisco Firepower Threat Defense&#34;)
+
+// All of these commands can be used to format various devices. We may want to only add when certain sysinfo are matched if failing causes problems.
+def formattingCommands = []
+formattingCommands.push(&#34;term len 0&#34;)           // Cisco Router/Switches
+formattingCommands.push(&#34;terminal width 0&#34;)     // Cisco Router/Switches
+formattingCommands.push(&#34;terminal length 0&#34;)    // Cisco Router/Switches
+formattingCommands.push(&#34;screen-width 0&#34;)       // Cisco Junos &#38; Others
+formattingCommands.push(&#34;screen-length 0&#34;)      // Cisco Junos &#38; Others
+formattingCommands.push(&#34;config paging disable&#34;)// Cisco Wireless LAN Controller
+formattingCommands.push(&#34;terminal pager 0&#34;)     // Cisco ASA Firewall
+formattingCommands.push(&#34;terminal datadump&#34;)    // Cisco Managed Switches
+
+def cli
+def smallBufferSize = 1024 // The size of the buffer used when making minor modifications to the terminal.
+def largeBufferSize = 1024 * 1024 // The size of the buffer used when reading the bulk of the config.
+def processReadTime = 120 // The seconds spent waiting for a command or process to return before buffer consumption stops.
+def maxPages = 50 // The maximum pages we will wait for.
+
+def success = false
+def formattingSuccessful = false
+
+def error = &#34;&#34;
+
+// This prompt regex is designed to pass a gauntlet of unusual prompts collected over the years.
+def rawPrompt = /(?-m)[^\n]+\s?[&#62;#$]\s*$/
+
+// We remove common characters used to decorate a terminal or provide interaction information.
+def termClean = /((?i)\x1b+\[\??(\d+[hjklnr]?(;\d*[hjklnr])?))*/
+def moreMatch = &#34;^\\s?&#60;?-+\\s*More\\s*-+&#62;?\\s?&#34;
+
+// CLI based approaches fail often. We make several attempts to connect and retrieve a single byte of data.
+def retries = 0
+while(retries &#60;= 5 &#38;&#38; !success) {
+	try {
+		cli = teln ? Expect.open(host, port.toInteger(), processReadTime) : Expect.open(host, port.toInteger(), user, pass, processReadTime)
+		success = waitForOutput(cli, 30000) // Wait for a single byte of information
+	}
+	catch (ex) {
+		sleep(1000)
+		error += &#34;[Connection Attempt ${retries}] ${ex.message}\n&#34;
+	}
+
+	retries++
+}
+
+if(success) {
+	try {
+		// At this point we are ready to check for a prompt, but don&#39;t know if the device has finished sending data.
+		// We wait until the output is stable. Staggered/Delayed data is reasonably common.
+		waitForStableOutput(cli, 300)
+		
+		if(cli.stdout().trim().readLines().last() =~ /[Uu]?ser\s?[Nn]ame\s?:|[Pp]?assword\s?:/) {
+			// Consume the prompt up to our authentication line and put it into cli.matched()
+			cli.expect([/[Uu]?ser\s?[Nn]ame\s?:/, /[Pp]?assword\s?:/] as String[], smallBufferSize)
+
+			if(cli.matched() =~ /[Uu]?ser\s?[Nn]ame\s?:/) {
+				cli.send(&#34;${user}\n&#34;)
+				cli.expect(&#34;[Pp]?assword:&#34;, smallBufferSize)
+			}
+
+			if(cli.matched() =~ /[Pp]?assword\s?:/) {
+				cli.send(&#34;${pass}\n&#34;)
+			}
+
+			waitForStableOutput(cli, 100)
+		}
+
+		// Now the data is stable, the standard output should have everything we need to gather a prompt.
+		def stdPrompt = cli.stdout() =~ rawPrompt.bitwiseNegate()
+		def prompt = &#34;&#34;
+
+		if(stdPrompt.size()) {
+			// We&#39;ve got our best guess at a prompt at this point. Clean it and get it ready for line matching.
+			prompt = &#34;^\\s*${termClean}${stdPrompt[0].trim().replaceAll(termClean,&#39;&#39;).trim().replaceAll(/[.*+?^()|\[\]\\{}$]/, &#39;\\\\$0&#39;)}&#34;
+			// Consume the buffer until we reach the prompt so we know we have a clean buffer to work with for future matches (avoiding race conditions).
+			cli.expect(prompt, smallBufferSize)
+		}
+		else {
+			// We didn&#39;t find a prompt in the standard output. Use expect to wait for one.
+			cli.expect(rawPrompt, smallBufferSize)
+			prompt = &#34;^\\s*${cli.matched().replaceAll(termClean,&#39;&#39;).trim().replaceAll(/[.*+?^()|\[\]\\{}$]/, &#39;\\\\$0&#39;)}&#34;
+		}
+
+		if(!basicMode) {
+			// The enable command will elevate the prompt if possible.
+			cli.send(&#34;enable\n&#34;)
+			cli.expect([&#34;(?i)password:&#34;, &#34;${prompt[0..-2]}[&#62;#\$]&#34;, prompt] as String[], smallBufferSize)
+
+			if(cli.matched().toLowerCase().contains(&#34;password&#34;)) {
+				cli.send(&#34;${epas}\n&#34;)
+				cli.expect(rawPrompt, smallBufferSize)
+			}
+
+			// The enable command may have changed the prompt. We&#39;ve got to get it again.
+			prompt = &#34;^${cli.matched().replaceAll(termClean,&#39;&#39;).trim().replaceAll(/[.*+?^()|\[\]\\{}$]/, &#39;\\\\$0&#39;)}&#34;
+			
+			// We aren&#39;t in basic mode so try and configure the terminal to avoid pagination with both variations of the width and length commands.
+
+			formattingCommands.each { command-&#62;
+				cli.send(&#34;${command}\n&#34;)
+
+				cli.expect(prompt, smallBufferSize)
+				if(cli.before().trim().readLines().size() &#60;= 1) {
+					formattingSuccessful = true
+				}
+			}
+
+			if(admn.toLowerCase().contains(&#34;true&#34;)) {
+				// Attempt to enter admin mode if requested.
+				cli.send(&#34;admin\n&#34;)
+				cli.expect(rawPrompt, smallBufferSize)
+				prompt = &#34;^.?${cli.matched().replaceAll(termClean,&#39;&#39;).trim().replaceAll(/[.*+?^()|\[\]\\{}$]/, &#39;\\\\$0&#39;)}&#34;
+			}
+		}
+
+		// At this point, all initialization is complete.
+
+		// Execute the show command for this instance. If we don&#39;t have a formatted terminal we add spaces to postpone a prompt being returned.
+		cli.send(formattingSuccessful ? &#34;show ${wild}\n&#34; : &#34;show ${wild}${&#39; &#39; * maxPages}\n&#34;);
+
+		// As we sometimes need to paginate the returned data, we will concatenate the output in a buffer.
+		def buffer = &#34;&#34;
+
+		// We loop throught all potential pages up to the limit set by &#34;maxPages&#34; (a default of 50 was double the ammount needed for anything in testing).
+		for(int i = 0; i &#60; maxPages; i++) {
+			cli.expect(&#34;${prompt}|${moreMatch}&#34;, largeBufferSize)
+
+			buffer += cli.before()
+
+			if(cli.matched().matches(moreMatch)) {
+				// We hit a page break. Send many new line characters to greatly reduce the chance of an early prompt being returned (one is not reliable).
+				cli.send(&#34;${&#39; &#39; * maxPages}\n&#34;)
+			} else {
+				// We matched the prompt and have to assume we&#39;ve gotten everything. We are unable to continue pagination even with more new line characters.
+				break
+			}
+			
+			if(i == maxPages - 1) {
+				throw new Exception(&#34;Pagination Failed: Max pages reached.&#34;)
+			}
+		}
+
+		// Attempt to clean the output of unwanted information, specifically backspace characters and the --More-- decoration.
+		def output = buffer.replaceAll(&#34;(\b+\\s*\b+)|(${moreMatch})&#34;,&#34;&#34;).trim()
+		
+		// Print the output of the show command if the input was valid. Remove the last line (the prompt).
+		if(output.toLowerCase().contains(&#34;invalid input detected&#34;)) {
+			success = false
+		} else {
+			output = output.trim().readLines().drop(1).join(System.lineSeparator()).trim()
+			print (output.length() &#62; (maxLength - maxString.length()) ? output.take(maxLength) + maxString : output)
+		}
+	} catch (ex) {
+		error += &#34;[Collecting] ${ex.message}\n&#34;
+		success = false
+	}
+
+	try {
+		// We always try to exit. Add an extra exit if we might be in privilege mode.
+		cli.send(&#34;exit\n&#34; * (basicMode ? 2 : 1))
+		cli.close()
+	}
+	catch(ex) {
+		error += &#34;[Closing] ${ex.message}\n&#34;
+		success = false
+	}
+}
+
+if(!success) {
+	error += cli ? &#34;--- CLI Output ---\n${(cli.stdout().length() &#62; 512 ? &#34;...${cli.stdout().drop(cli.stdout().length() - 512)}&#34; : cli.stdout())}\n&#34; : &#34;&#34;
+	error += cli ? &#34;--- CLI Base64 ---\n${GZipCompressor.INSTANCE.compress(cli.stdout().bytes).encodeBase64().toString()}\n&#34; : &#34;&#34;
+	println &#34;--- Error Logs ---\n${error}&#34;
+	//new File(&#34;../logs/Cisco_IOS_Collection ${host.replaceAll(&#39;[^a-zA-Z0-9-_\\.]&#39;, &#39;_&#39;)}.txt&#34;).write(error)
+	return 1
+}
+
+return 0
+
+def waitForStableOutput(cli, requiredStability) {
+	def outputStability = 0
+	def lastLength = -1
+
+	while(outputStability &#60; requiredStability) {
+		outputStability += (cli.stdout().length() == lastLength) ? 1 : -outputStability
+		lastLength = cli.stdout().length()
+		sleep(10)
+	}   
+}
+
+def waitForOutput(cli, timeout) {
+	def start = System.currentTimeMillis()
+
+	while(!cli.stdout()) {
+		if(System.currentTimeMillis() - start &#62; timeout) {
+			return false
+		}
+		sleep(1)
+	}
+
+	return true
+}</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>windowsscript</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>linuxscript</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>windowscmdline</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>linuxcmdline</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>csfileformat</name>
+            <value>arbitrary</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>cstimestampformat</name>
+            <value>yyyy-MM-dd hh:mm:ss z</value>
+            <comment></comment>
+        </attribute>
+        </attributes>
+        <datapoints>
+        <datapoint>
+            <name>DifferenceTest</name>
+            <dataType>1</dataType>
+            <type>2</type>
+            <postprocessormethod>none</postprocessormethod>
+            <postprocessorparam>{&#34;format&#34;:&#34;arbitrary&#34;,&#34;diff_check&#34;:{&#34;ignore_line_with_regex&#34;:[&#34;^.*up\\s*\\d+\\s*(years|days|hours|minutes).*&#34;,&#34;(Mon|Tue|Wed|Thu|Fri|Sat|Sun) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \\d+ \\d+:\\d+\\d+:\\d+&#34;,&#34;Using \\d+ out of \\d+ bytes&#34;,&#34;^System restarted at.*&#34;,&#34;(^[Ss]witch\\s|^)[Uu]ptime.*&#34;],&#34;ignore_line_start_with&#34;:[&#34;ntp clock-period&#34;,&#34;!&#34;,&#34;Current configuration:&#34;],&#34;ignore_blank_lines&#34;:true,&#34;ignore_line_contain&#34;:[&#34;Uptime&#34;,&#34;uptime&#34;]}}</postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr>= 1</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description></description>
+            <maxvalue>1</maxvalue>
+            <minvalue>0</minvalue>
+            <userparam1>ignore</userparam1>
+            <userparam2>true</userparam2>
+            <userparam3>0</userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        </datapoints>
+        <graphs>
+        </graphs>
+        <overviewgraphs>
+        </overviewgraphs>
+        <scripts>
+        </scripts>
+    </entry>
+</feed>

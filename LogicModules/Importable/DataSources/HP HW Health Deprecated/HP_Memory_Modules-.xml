@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<feed  version="1.0" hasPendingRequests="false" >
+  <company></company>
+  <status>200</status>
+  <errmsg>OK</errmsg>
+  <interval>0</interval>
+    <entry type="predatasource">
+        <version>1508347824</version>
+        <name>HP Memory Modules-</name>
+        <displayedas>HP Memory Modules-</displayedas>
+        <description>Monitors the status and condition of HP Memory Modules</description>
+        <collector>snmp</collector>
+        <hasMultiInstances>true</hasMultiInstances>
+        <schedule>180</schedule>
+        <appliesTo>system.sysoid =~ &#34;1.3.6.1.4.1.232.9.4.10&#34;</appliesTo>
+        <wildcardauto>true</wildcardauto>
+        <wildcardpersist>false</wildcardpersist>
+        <wildcardlinuxscript>ad_snmp</wildcardlinuxscript>
+        <wildcardlinuxcmdline> type=&#34;value&#34; oid=&#34;.1.3.6.1.4.1.232.6.2.14.13.1.1&#34;  descOid=&#34;.1.3.6.1.4.1.232.6.2.14.13.1.13&#34; oid2=&#34;&#34;  </wildcardlinuxcmdline>
+        <wildcardwinscript>ad_snmp</wildcardwinscript>
+        <wildcardwincmdline> type=&#34;value&#34; oid=&#34;.1.3.6.1.4.1.232.6.2.14.13.1.1&#34;  descOid=&#34;.1.3.6.1.4.1.232.6.2.14.13.1.13&#34; oid2=&#34;&#34;  </wildcardwincmdline>
+        <wildcardgroovyscript></wildcardgroovyscript>
+        <wildcardschedule>1440</wildcardschedule>
+        <wildcarddisable>false</wildcarddisable>
+        <wildcarddeleteinactive>false</wildcarddeleteinactive>
+        <agdmethod>none</agdmethod>
+        <agdparams></agdparams>
+        <group>HP Health</group>
+        <tags></tags>
+        <technology></technology>
+        <adlist><![CDATA[{"agdmethod":"none","method":"ad_snmp","agdparams":"","id":0,"filters":[{"attribute":".1.3.6.1.4.1.232.6.2.14.13.1.19","operation":"NotEqual","value":"2"}],"params":{"descOid":".1.3.6.1.4.1.232.6.2.14.13.1.13","oid":".1.3.6.1.4.1.232.6.2.14.13.1.1","ILP":"[]","oid2":"","type":"value"}}]]></adlist>
+        <schemaVersion>2</schemaVersion>
+        <dataSourceType>1</dataSourceType>
+        <attributes>
+        <attribute>
+            <name>ip</name>
+            <value>dns</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>__filter_0</name>
+            <value>.1.3.6.1.4.1.232.6.2.14.13.1.19	NotEqual	2</value>
+            <comment>Only monitor modules which are present</comment>
+        </attribute>
+        </attributes>
+        <datapoints>
+        <datapoint>
+            <name>cpqHeResMem2ModuleCondition</name>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>none</postprocessormethod>
+            <postprocessorparam></postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr>!= 2 2</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody>Memory Module ##INSTANCE## on ##HOST## is reporting a value of ##VALUE##. Putting the host into ##LEVEL##.  This started at ##START## - or ##DURATION## ago.
+
+Status Meanings:
+
+other(1):
+ECC is not supported on this memory module or the
+condition could not be determined.
+ok(2):
+The memory module is operating normally.
+degraded(3):
+The memory module is correctable error count has exceeded
+threshold or a configuration error has been detected.
+degradedModuleIndexUnknown(4):
+The correctable error count has exceeded threshold.
+The module number not available.</alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>This provides the current status of the correctable memory
+errors for this memory module.</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <userparam1>.1.3.6.1.4.1.232.6.2.14.13.1.20.##WILDVALUE##</userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>3</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>cpqHeResMem2ModuleStatus</name>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>none</postprocessormethod>
+            <postprocessorparam></postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr>!= 4 4</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody>Memory Module ##INSTANCE## on ##HOST## is reporting a value of ##VALUE##. Putting the host into ##LEVEL##.  This started at ##START## - or ##DURATION## ago.
+
+Status Meanings:
+other(1):
+The status is unknown or could not be determined.
+notPresent(2):
+The memory module is not present or is un-initialized.
+present(3):
+The memory module is present but not in use.
+good(4):
+The memory module is present and in use.  The corrected
+error threshold has not been exceeded.
+add(5):
+The memory module has been added, but is not yet in use.
+upgraded(6):
+The memory module has been upgraded, but the memory is not
+yet in use.
+missing(7):
+An expected memory module is missing.
+doesNotMatch(8):
+The memory module does not match the other memory modules
+within the bank.
+notSupported(9):
+The memory module is not supported.
+badConfig(10):
+The memory module violates the add/upgrade configuration
+rules.
+degraded(11):
+The memory module&#39;s correctable error count has exceeded
+threshold.</alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>This provides the current status of the correctable memory
+errors for this memory module.</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <userparam1>.1.3.6.1.4.1.232.6.2.14.13.1.19.##WILDVALUE##</userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>3</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        </datapoints>
+        <graphs>
+        <graph>
+            <name>Module Condition</name>
+            <title>Module Condition</title>
+            <verticallabel>2=OK</verticallabel>
+            <rigid>true</rigid>
+            <maxvalue>NaN</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>1</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>cpqHeResMem2ModuleCondition</name>
+            <datapointname>cpqHeResMem2ModuleCondition</datapointname>
+            <cf>1</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>1</type>
+                <legend>Condition</legend>
+                <color>blue</color>
+                <datapointname>cpqHeResMem2ModuleCondition</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        <graph>
+            <name>Module Status</name>
+            <title>Module Status</title>
+            <verticallabel>4=Good</verticallabel>
+            <rigid>true</rigid>
+            <maxvalue>NaN</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>1</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>cpqHeResMem2ModuleStatus</name>
+            <datapointname>cpqHeResMem2ModuleStatus</datapointname>
+            <cf>1</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>1</type>
+                <legend>Status</legend>
+                <color>blue</color>
+                <datapointname>cpqHeResMem2ModuleStatus</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        </graphs>
+        <overviewgraphs>
+        </overviewgraphs>
+        <scripts>
+        </scripts>
+    </entry>
+</feed>

@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<feed  version="1.0" hasPendingRequests="false" >
+  <company></company>
+  <status>200</status>
+  <errmsg>OK</errmsg>
+  <interval>0</interval>
+    <entry type="predatasource">
+        <version>1505749679</version>
+        <name>HP Logical Drives-</name>
+        <displayedas>HP Logical Drives-</displayedas>
+        <description></description>
+        <collector>snmp</collector>
+        <hasMultiInstances>true</hasMultiInstances>
+        <schedule>300</schedule>
+        <appliesTo>hasCategory(&#34;snmp&#34;) &#38;&#38; Servers()</appliesTo>
+        <wildcardauto>true</wildcardauto>
+        <wildcardpersist>false</wildcardpersist>
+        <wildcardlinuxscript>ad_snmp</wildcardlinuxscript>
+        <wildcardlinuxcmdline> type=&#34;wildcard&#34; oid=&#34;.1.3.6.1.4.1.232.3.2.3.1.1.2&#34;  descOid=&#34;.1.3.6.1.4.1.232.3.2.3.1.1.14&#34; oid2=&#34;&#34;  </wildcardlinuxcmdline>
+        <wildcardwinscript>ad_snmp</wildcardwinscript>
+        <wildcardwincmdline> type=&#34;wildcard&#34; oid=&#34;.1.3.6.1.4.1.232.3.2.3.1.1.2&#34;  descOid=&#34;.1.3.6.1.4.1.232.3.2.3.1.1.14&#34; oid2=&#34;&#34;  </wildcardwincmdline>
+        <wildcardgroovyscript></wildcardgroovyscript>
+        <wildcardschedule>1440</wildcardschedule>
+        <wildcarddisable>false</wildcarddisable>
+        <wildcarddeleteinactive>false</wildcarddeleteinactive>
+        <agdmethod>none</agdmethod>
+        <agdparams></agdparams>
+        <group>HP Health</group>
+        <tags>hp,health,storage,drive</tags>
+        <technology></technology>
+        <adlist><![CDATA[{"agdmethod":"none","method":"ad_snmp","agdparams":"","id":0,"filters":[],"params":{"descOid":".1.3.6.1.4.1.232.3.2.3.1.1.14","oid":".1.3.6.1.4.1.232.3.2.3.1.1.2","ILP":"[]","oid2":"","type":"wildcard"}}]]></adlist>
+        <schemaVersion>2</schemaVersion>
+        <dataSourceType>1</dataSourceType>
+        <attributes>
+        <attribute>
+            <name>ip</name>
+            <value>dns</value>
+            <comment></comment>
+        </attribute>
+        </attributes>
+        <datapoints>
+        <datapoint>
+            <name>LogicalDriveError</name>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>expression</postprocessormethod>
+            <postprocessorparam>If(eq(status,3),3, if(eq(status,10),10, if(eq(status,11),11,0)))</postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr>!= 0</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject>Drive is Failing</alertsubject>
+            <alertbody>Logical drive ##DSIDESCRIPTION## on ##HOSTNAME## is reporting an error code of ##VALUE##.
+Status codes indicate:
+3 - more physical drives have failed than the
+fault tolerance mode of the logical drive can handle
+10 - Indicates that the drive array enclosure that contains the
+logical drive is overheating.  The drive array is still
+functioning, but should be shutdown.
+11  - Indicates that the drive array enclosure that contains the
+logical drive has overheated.  The logical drive is no longer functioning.
+
+This started at ##START## - or ##DURATION## ago.</alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Flag errors on major failures.</description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>1</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>Status</name>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>none</postprocessormethod>
+            <postprocessorparam></postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Logical Drive Status.
+Ok (2) normal operation.
+Failed (3)
+Unconfigured (4)
+Recovering (5)
+ Interim Recovery Mode: at least one physical drive has failed
+Ready Rebuild (6) The physical drive that failed has been replaced, but the logical drive is still operating in Interim Recovery Mode.
+Rebuilding (7)
+Wrong Drive (8) Indicates that the wrong physical drive was replaced after a physical drive failure.
+Bad Connect (9) a physical drive is not responding.
+Overheating (10)
+Array enclosure is overheating.  The drive array should be shutdown.
+Shutdown (11)
+Array enclosure has overheated.  The logical drive is no longer functioning.
+Expanding (12)
+Logical drive is redistributing logical drive data to the newly added physical drive.
+Not Available (13).
+Queued For Expansion (14)
+Multi-path Access Degraded (15)
+Indicates that previously all disk drives of this logical drive had more than one I/O path to the controller, but now one or few of them have only one I/O path.
+Erasing (16)</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <userparam1>.1.3.6.1.4.1.232.3.2.3.1.1.4.##WILDVALUE##</userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>5</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        </datapoints>
+        <graphs>
+        <graph>
+            <name>Status</name>
+            <title>Status</title>
+            <verticallabel>2=OK</verticallabel>
+            <rigid>true</rigid>
+            <maxvalue>NaN</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>1</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>Status</name>
+            <datapointname>Status</datapointname>
+            <cf>1</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>1</type>
+                <legend>2=OK</legend>
+                <color>blue</color>
+                <datapointname>Status</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        </graphs>
+        <overviewgraphs>
+        </overviewgraphs>
+        <scripts>
+        </scripts>
+    </entry>
+</feed>

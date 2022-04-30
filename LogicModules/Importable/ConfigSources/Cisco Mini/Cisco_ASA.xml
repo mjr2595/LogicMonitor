@@ -1,0 +1,462 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<feed  version="1.0" hasPendingRequests="false" >
+  <company></company>
+  <status>200</status>
+  <errmsg>OK</errmsg>
+  <interval>0</interval>
+    <entry type="predatasource">
+        <version>1481582074</version>
+        <name>Cisco_ASA</name>
+        <displayedas>ASA Configs</displayedas>
+        <description>Configuration for cisco asa/asr devices</description>
+        <collector>script</collector>
+        <hasMultiInstances>true</hasMultiInstances>
+        <schedule>3600</schedule>
+        <appliesTo>( 
+  startsWith( system.sysinfo, &#34;Cisco Adaptive Security Appliance&#34; ) &#38;&#38;
+  ssh.user &#38;&#38;
+  ssh.pass
+)</appliesTo>
+        <wildcardauto>true</wildcardauto>
+        <wildcardpersist>false</wildcardpersist>
+        <wildcardlinuxscript>ad_script</wildcardlinuxscript>
+        <wildcardlinuxcmdline>type=&#34;embeded&#34; </wildcardlinuxcmdline>
+        <wildcardwinscript>ad_script</wildcardwinscript>
+        <wildcardwincmdline>type=&#34;embeded&#34; </wildcardwincmdline>
+        <wildcardgroovyscript>/**
+ *        NAME: Cisco_ASA_AD.groovy
+ * DESCRIPTION: Connects to the ASA via ssh using the ssh.user and ssh.pass properties.
+ *              The script will grab the output of show ? to determine what data we have
+ *              access to.  Using the values defined in the desired_show_commands array,
+ *              we check for these in the output of show ?, and if there is a match, these
+ *              values are returned as instances.
+ */
+
+import com.santaba.agent.groovyapi.expect.Expect;
+
+def show_commands
+def configs = [:]
+def desired_show_commands = [
+&#34;running-config&#34;,
+&#34;startup-config&#34;,
+&#34;version&#34;,
+&#34;inventory&#34;
+]
+
+
+def host, user, pass        // These will get set further down in the script.
+def enable_pass = null      // If the user has specified an enable password, this will get set further down.
+def priv_exec_mode = false  // Notes what EXEC mode we are in.  Initially we assume USER EXEC.
+
+try
+{
+    host = hostProps.get(&#34;system.hostname&#34;)
+}
+catch (all)
+{
+    println &#34;(debug::fatal) Could not retrieve the system.hostname value.  Exiting.&#34;
+    return 1
+}
+
+try
+{
+    user = hostProps.get(&#34;ssh.user&#34;)
+}
+catch (all)
+{
+    println &#34;(debug::fatal) Could not retrieve the config.user device property.  This is required for authentication.  Exiting.&#34;
+    return 1
+}
+
+try
+{
+    pass = hostProps.get(&#34;ssh.pass&#34;)
+}
+catch (all)
+{
+    println &#34;(debug::fatal) Could not retrieve the config.pass device property.  This is required for authentication.  Exiting.&#34;
+    return 1
+}
+
+try
+{
+    enable_pass = hostProps.get(&#34;ssh.enable.pass&#34;)
+}
+catch (all)
+{
+    println &#34;(debug) Could not retrieve the config.enable.pass device property.  This is most likely fine, and implies that the&#34; +
+    &#34; provided user already has sufficient default privileges.&#34;
+
+}
+
+// open an ssh connection and wait for the prompt
+cli = Expect.open(host, user, pass);
+cli.expect(&#34;&#62;&#34;, &#34;#&#34;);
+
+// Check to see what the previous expect command matched.  This will us which user mode we have been dropped into.
+if (cli.matched() == &#34;#&#34;)
+{
+    priv_exec_mode = true
+}
+
+// Let&#39;s determine the console prompt, sans the exec mode identifier.
+def prompt = &#34;&#34;
+cli.before().eachLine() { line -&#62; prompt = line }
+
+// If we are not in privileged exec mode, we need to be in order to show the configurations.
+if (!priv_exec_mode)
+{
+
+    // We need privileged exec mode in order to grab the config.
+    cli.send(&#34;enable\n&#34;)
+
+    // Next check for the Password: prompt.  If we get a timeout exception thrown, then something with the enable step failed.
+    try
+    {
+        cli.expect(&#34;Password:&#34;)
+    }
+    catch (TimeoutException)
+    {
+        println &#34;(debug::fatal) Timed out waiting for the Password prompt.  Exiting.&#34;
+        return 1
+    }
+
+    // If we made it this far, we have received the prompt for a password.  If an enable_password has been specified, use it.
+    if (enable_pass)
+    {
+        cli.send(&#34;${enable_pass}\n&#34;)
+    }
+    else
+    {
+        cli.send(&#34;${pass}\n&#34;)
+    }
+
+
+    try
+    {
+        cli.expect(&#34;#&#34;)
+    }
+    catch (TimeoutException)
+    {
+        println &#34;(debug::fatal) Timed out waiting for PRIV EXEC prompt (#) after providing the enable password.  Exiting.&#34;
+        return 1
+    }
+    catch (all)
+    {
+        println &#34;(debug:fatal) Something occurred while waiting for the PRIV EXEC prompt.  Exiting.&#34;
+        println &#34;${all.getMessage()}&#34;
+        return 1
+    }
+
+    priv_exec_mode = true
+
+}
+
+// ensure the page-by-page view doesn&#39;t foul the config output
+cli.send(&#34;terminal pager 0\n&#34;);
+cli.expect(&#34;#&#34;);
+
+cli.send(&#34;show running-config terminal\n&#34;)
+cli.expect(&#34;#&#34;)
+def terminal_width = cli.before()
+
+// display the config
+cli.send(&#34;show ?&#34;);
+cli.expect(&#34;# show&#34;)
+show_commands = cli.before()
+
+// logout from the device
+cli.send(&#34;\nexit\n&#34;);
+cli.expect(&#34;# exit&#34;);
+
+// close the ssh connection handle then print the config
+cli.expectClose();
+
+show_commands.eachLine
+{ entry -&#62;
+
+    if (!entry.trim().startsWith(&#34;show ?&#34;) &#38;&#38; !entry.trim().startsWith(prompt) &#38;&#38; !entry.isEmpty())
+    {
+
+        if (entry.trim().tokenize().size() &#62;= 2)
+        {
+
+            def cmd = entry.trim().tokenize()[0]
+            def desc = entry.trim().tokenize()[1..-1].join(&#34; &#34;)
+
+            if (desired_show_commands.contains(cmd.toString()))
+            {
+                configs &#60;&#60; [&#34;${cmd}&#34;: &#34;${desc}&#34;]
+            }
+        }
+    }
+}
+
+configs.each
+{ config -&#62;
+    println &#34;${config.key}##${config.key}##${config.value}&#34;
+}
+
+return 0;
+</wildcardgroovyscript>
+        <wildcardschedule>0</wildcardschedule>
+        <wildcarddisable>false</wildcarddisable>
+        <wildcarddeleteinactive>true</wildcarddeleteinactive>
+        <agdmethod>none</agdmethod>
+        <agdparams></agdparams>
+        <group></group>
+        <tags>network, cisco, asa</tags>
+        <technology>- requires ssh access via credentials set in ssh.user and ssh.pass
+- expects that the user logs in directly to &#34;enable&#34; mode
+- expects that ssh.pass is the same as the enable password</technology>
+        <adlist><![CDATA[{"agdmethod":"none","method":"ad_script","agdparams":"","id":0,"filters":[],"params":{"type":"embeded","groovyscript":"/**\n *        NAME: Cisco_ASA_AD.groovy\n * DESCRIPTION: Connects to the ASA via ssh using the ssh.user and ssh.pass properties.\n *              The script will grab the output of show ? to determine what data we have\n *              access to.  Using the values defined in the desired_show_commands array,\n *              we check for these in the output of show ?, and if there is a match, these\n *              values are returned as instances.\n */\n\nimport com.santaba.agent.groovyapi.expect.Expect;\n\ndef show_commands\ndef configs = [:]\ndef desired_show_commands = [\n\"running-config\",\n\"startup-config\",\n\"version\",\n\"inventory\"\n]\n\n\ndef host, user, pass        // These will get set further down in the script.\ndef enable_pass = null      // If the user has specified an enable password, this will get set further down.\ndef priv_exec_mode = false  // Notes what EXEC mode we are in.  Initially we assume USER EXEC.\n\ntry\n{\n    host = hostProps.get(\"system.hostname\")\n}\ncatch (all)\n{\n    println \"(debug::fatal) Could not retrieve the system.hostname value.  Exiting.\"\n    return 1\n}\n\ntry\n{\n    user = hostProps.get(\"ssh.user\")\n}\ncatch (all)\n{\n    println \"(debug::fatal) Could not retrieve the config.user device property.  This is required for authentication.  Exiting.\"\n    return 1\n}\n\ntry\n{\n    pass = hostProps.get(\"ssh.pass\")\n}\ncatch (all)\n{\n    println \"(debug::fatal) Could not retrieve the config.pass device property.  This is required for authentication.  Exiting.\"\n    return 1\n}\n\ntry\n{\n    enable_pass = hostProps.get(\"ssh.enable.pass\")\n}\ncatch (all)\n{\n    println \"(debug) Could not retrieve the config.enable.pass device property.  This is most likely fine, and implies that the\" +\n    \" provided user already has sufficient default privileges.\"\n\n}\n\n// open an ssh connection and wait for the prompt\ncli = Expect.open(host, user, pass);\ncli.expect(\">\", \"#\");\n\n// Check to see what the previous expect command matched.  This will us which user mode we have been dropped into.\nif (cli.matched() == \"#\")\n{\n    priv_exec_mode = true\n}\n\n// Let's determine the console prompt, sans the exec mode identifier.\ndef prompt = \"\"\ncli.before().eachLine() { line -> prompt = line }\n\n// If we are not in privileged exec mode, we need to be in order to show the configurations.\nif (!priv_exec_mode)\n{\n\n    // We need privileged exec mode in order to grab the config.\n    cli.send(\"enable\\n\")\n\n    // Next check for the Password: prompt.  If we get a timeout exception thrown, then something with the enable step failed.\n    try\n    {\n        cli.expect(\"Password:\")\n    }\n    catch (TimeoutException)\n    {\n        println \"(debug::fatal) Timed out waiting for the Password prompt.  Exiting.\"\n        return 1\n    }\n\n    // If we made it this far, we have received the prompt for a password.  If an enable_password has been specified, use it.\n    if (enable_pass)\n    {\n        cli.send(\"${enable_pass}\\n\")\n    }\n    else\n    {\n        cli.send(\"${pass}\\n\")\n    }\n\n\n    try\n    {\n        cli.expect(\"#\")\n    }\n    catch (TimeoutException)\n    {\n        println \"(debug::fatal) Timed out waiting for PRIV EXEC prompt (#) after providing the enable password.  Exiting.\"\n        return 1\n    }\n    catch (all)\n    {\n        println \"(debug:fatal) Something occurred while waiting for the PRIV EXEC prompt.  Exiting.\"\n        println \"${all.getMessage()}\"\n        return 1\n    }\n\n    priv_exec_mode = true\n\n}\n\n// ensure the page-by-page view doesn't foul the config output\ncli.send(\"terminal pager 0\\n\");\ncli.expect(\"#\");\n\ncli.send(\"show running-config terminal\\n\")\ncli.expect(\"#\")\ndef terminal_width = cli.before()\n\n// display the config\ncli.send(\"show ?\");\ncli.expect(\"# show\")\nshow_commands = cli.before()\n\n// logout from the device\ncli.send(\"\\nexit\\n\");\ncli.expect(\"# exit\");\n\n// close the ssh connection handle then print the config\ncli.expectClose();\n\nshow_commands.eachLine\n{ entry ->\n\n    if (!entry.trim().startsWith(\"show ?\") && !entry.trim().startsWith(prompt) && !entry.isEmpty())\n    {\n\n        if (entry.trim().tokenize().size() >= 2)\n        {\n\n            def cmd = entry.trim().tokenize()[0]\n            def desc = entry.trim().tokenize()[1..-1].join(\" \")\n\n            if (desired_show_commands.contains(cmd.toString()))\n            {\n                configs << [\"${cmd}\": \"${desc}\"]\n            }\n        }\n    }\n}\n\nconfigs.each\n{ config ->\n    println \"${config.key}##${config.key}##${config.value}\"\n}\n\nreturn 0;\n"}}]]></adlist>
+        <schemaVersion>2</schemaVersion>
+        <dataSourceType>2</dataSourceType>
+        <attributes>
+        <attribute>
+            <name>scripttype</name>
+            <value>embed</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>scriptgroovy</name>
+            <value>/**
+ *        NAME: Cisco_ASA_Collection.groovy
+ * DESCRIPTION: Connects to the ASA via ssh using the ssh.user and ssh.pass properties.
+ *              The value provided in the taskProp &#34;wildvalue&#34; will be the config we run
+ *              a show against.  The output is lightly filtered to remove prompts and commands
+ *              that were captured, then sent to output.
+ *
+ */
+
+
+import com.santaba.agent.groovyapi.expect.Expect;
+
+def config_mode = taskProps.get(&#34;wildvalue&#34;).toLowerCase() // either running or startup
+
+def host, user, pass        // These will get set further down in the script.
+def enable_pass = null      // If the user has specified an enable password, this will get set further down.
+def priv_exec_mode = false  // Notes what EXEC mode we are in.  Initially we assume USER EXEC.
+
+
+try
+{
+    host = hostProps.get(&#34;system.hostname&#34;)
+}
+catch (all)
+{
+    println &#34;(debug::fatal) Could not retrieve the system.hostname value.  Exiting.&#34;
+    return 1
+}
+
+try
+{
+    user = hostProps.get(&#34;ssh.user&#34;)
+}
+catch (all)
+{
+    println &#34;(debug::fatal) Could not retrieve the config.user device property.  This is required for authentication.  Exiting.&#34;
+    return 1
+}
+
+try
+{
+    pass = hostProps.get(&#34;ssh.pass&#34;)
+}
+catch (all)
+{
+    println &#34;(debug::fatal) Could not retrieve the config.pass device property.  This is required for authentication.  Exiting.&#34;
+    return 1
+}
+
+try
+{
+    enable_pass = hostProps.get(&#34;ssh.enable.pass&#34;)
+}
+catch (all)
+{
+    println &#34;(debug) Could not retrieve the config.enable.pass device property.  This is most likely fine, and implies that the&#34; +
+    &#34; provided user already has sufficient default privileges.&#34;
+
+}
+
+// open an ssh connection and wait for the prompt
+cli = Expect.open(host, user, pass);
+cli.expect(&#34;&#62;&#34;, &#34;#&#34;);
+
+// Check to see what the previous expect command matched.  This will us which user mode we have been dropped into.
+if (cli.matched() == &#34;#&#34;)
+{
+    priv_exec_mode = true
+}
+
+// Let&#39;s determine the console prompt, sans the exec mode identifier.
+def prompt = &#34;&#34;
+cli.before().eachLine() { line -&#62; prompt = line }
+
+// If we are not in privileged exec mode, we need to be in order to show the configurations.
+if (!priv_exec_mode)
+{
+
+    // We need privileged exec mode in order to grab the config.
+    cli.send(&#34;enable\n&#34;)
+
+    // Next check for the Password: prompt.  If we get a timeout exception thrown, then something with the enable step failed.
+    try
+    {
+        cli.expect(&#34;Password:&#34;)
+    }
+    catch (TimeoutException)
+    {
+        println &#34;(debug::fatal) Timed out waiting for the Password prompt.  Exiting.&#34;
+        return 1
+    }
+
+    // If we made it this far, we have received the prompt for a password.  If an enable_password has been specified, use it.
+    if (enable_pass)
+    {
+        cli.send(&#34;${enable_pass}\n&#34;)
+    }
+    else
+    {
+        cli.send(&#34;${pass}\n&#34;)
+    }
+
+
+    try
+    {
+        cli.expect(&#34;#&#34;)
+    }
+    catch (TimeoutException)
+    {
+        println &#34;(debug::fatal) Timed out waiting for PRIV EXEC prompt (#) after providing the enable password.  Exiting.&#34;
+        return 1
+    }
+    catch (all)
+    {
+        println &#34;(debug:fatal) Something occurred while waiting for the PRIV EXEC prompt.  Exiting.&#34;
+        println &#34;${all.getMessage()}&#34;
+        return 1
+    }
+
+    priv_exec_mode = true
+
+}
+
+// ensure the page-by-page view doesn&#39;t foul the config output
+cli.send(&#34;terminal pager 0\n&#34;);
+cli.expect(&#34;#&#34;);
+
+// display the config
+cli.send(&#34;show ${config_mode}\n&#34;);
+cli.expect(&#34;#&#34;)
+
+// collect the output, then strip the &#34;ntp clock-period&#34; value
+config = cli.before();
+
+// logout from the device
+cli.send(&#34;\nexit\n&#34;);
+cli.expect(&#34;# exit&#34;);
+
+// close the ssh connection handle then print the config
+cli.expectClose();
+
+config.eachLine() 
+{ entry -&#62;
+    if (!entry.trim().startsWith(&#34;show ${config_mode}&#34;) &#38;&#38; !entry.trim().startsWith(prompt))
+    {
+        println entry
+    }
+
+}
+
+return 0;</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>windowsscript</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>linuxscript</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>windowscmdline</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>linuxcmdline</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>csfileformat</name>
+            <value>arbitrary</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>cstimestampformat</name>
+            <value>yyyy-MM-dd hh:mm:ss z</value>
+            <comment></comment>
+        </attribute>
+        </attributes>
+        <datapoints>
+        <datapoint>
+            <name>DifferenceTest</name>
+            <dataType>1</dataType>
+            <type>2</type>
+            <postprocessormethod>none</postprocessormethod>
+            <postprocessorparam>{&#34;format&#34;:&#34;arbitrary&#34;,&#34;diff_check&#34;:{&#34;ignore_space&#34;:false,&#34;ignore_blank_lines&#34;:false}}</postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr>= 1</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <description></description>
+            <maxvalue>1</maxvalue>
+            <minvalue>0</minvalue>
+            <userparam1>ignore</userparam1>
+            <userparam2>true</userparam2>
+            <userparam3>0</userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>RetrievalTest</name>
+            <dataType>1</dataType>
+            <type>2</type>
+            <postprocessormethod>none</postprocessormethod>
+            <postprocessorparam>{&#34;fetch_check&#34;:{},&#34;format&#34;:&#34;arbitrary&#34;}</postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr>= 1</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <description>Config cannot be retrieved for this ASA.</description>
+            <maxvalue>1</maxvalue>
+            <minvalue>0</minvalue>
+            <userparam1>fetch</userparam1>
+            <userparam2>false</userparam2>
+            <userparam3>0</userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        </datapoints>
+        <graphs>
+        </graphs>
+        <overviewgraphs>
+        </overviewgraphs>
+        <scripts>
+        </scripts>
+    </entry>
+</feed>
