@@ -1,0 +1,420 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<feed  version="1.0" hasPendingRequests="false" >
+  <company></company>
+  <status>200</status>
+  <errmsg>OK</errmsg>
+  <interval>0</interval>
+    <entry type="predatasource">
+        <version>1651445928</version>
+        <name>LinuxNewProcesses_withAD_prop</name>
+        <displayedas>Monitored Linux Processes</displayedas>
+        <description>This datasource monitors custom processes by performing a regular expression match on the process path.
+
+**Requires a property set on the device named &#34;processes&#34; with process names as a comma-delimited list for the value:
+ex. snmpd,sshd,snapd</description>
+        <collector>script</collector>
+        <hasMultiInstances>true</hasMultiInstances>
+        <useWildValueAsUniqueIdentifier>false</useWildValueAsUniqueIdentifier>
+        <schedule>180</schedule>
+        <appliesTo>isLinux() &#38;&#38; processes</appliesTo>
+        <wildcardauto>true</wildcardauto>
+        <wildcardpersist>true</wildcardpersist>
+        <wildcardlinuxscript>ad_script</wildcardlinuxscript>
+        <wildcardlinuxcmdline>type=&#34;embeded&#34; </wildcardlinuxcmdline>
+        <wildcardwinscript>ad_script</wildcardwinscript>
+        <wildcardwincmdline>type=&#34;embeded&#34; </wildcardwincmdline>
+        <wildcardgroovyscript>import com.santaba.agent.groovyapi.snmp.Snmp;
+ 
+//Getting the Hostname to be used
+def hostname = hostProps.get(&#34;system.hostname&#34;);
+//Get processes from property
+def processesProp = hostProps.get(&#34;processes&#34;);
+//cast as array of Strings
+def processes = processesProp.split(&#34;,&#34;)
+
+// Choose the oid to walk, need combo of both
+def oid1 = &#34;1.3.6.1.2.1.25.4.2.1.4&#34;;
+def oid2 = &#34;1.3.6.1.2.1.25.4.2.1.5&#34;;
+ 
+// Walk both oids
+def oidOneWalk = Snmp.walk(hostname, oid1);
+def oidTwoWalk = Snmp.walk(hostname, oid2);
+
+// combine all processes into single list
+combinedWalk = oidOneWalk + oidTwoWalk
+def list = combinedWalk.readLines();
+
+// Make a map to store results in
+def results = [:];
+ 
+// Loop through the returned lines
+list.each
+{ line-&#62;
+	 
+	// Split the result
+	tokens = line.split(&#34;=&#34;);
+
+	// Check that the path has the processToMonitor in it
+	processes.each
+	{ process-&#62;
+		if(tokens.last().toLowerCase().contains(process.toLowerCase()))
+		{
+			def result = results[tokens.last().split(&#34;/&#34;).last()];
+		   
+			// Check to see if this result isnt in the map
+			if(result == null)
+			{
+				// Create a list for theoids to go in
+			  result = [];
+			}
+			 // Add the oid to the list in the result
+			result.add(tokens.first().split(&#34;\\.&#34;).last().trim());
+
+			// Add this result to the Map
+			results[tokens.last().split(&#34;/&#34;).last()] = result;
+		}
+	}
+}
+
+
+// Loop through all results
+results.each
+{
+    key, value -&#62;
+   
+    // Print the results in the standard AD format
+    println(value.join(&#39;,&#39;) + &#34;##&#34; + key);
+}
+ 
+return 0;</wildcardgroovyscript>
+        <wildcardschedule>15</wildcardschedule>
+        <wildcarddisable>false</wildcarddisable>
+        <wildcarddeleteinactive>false</wildcarddeleteinactive>
+        <agdmethod>none</agdmethod>
+        <agdparams></agdparams>
+        <group>LMTest</group>
+        <tags></tags>
+        <technology>*** NOT supported by LogicMonitor ***
+This is a customer DataSource written as a test. Use at own risk.</technology>
+        <adlist><![CDATA[{"agdmethod":"none","method":"ad_script","agdparams":"","id":0,"filters":[],"params":{"type":"embeded","groovyscript":"import com.santaba.agent.groovyapi.snmp.Snmp;\n \n//Getting the Hostname to be used\ndef hostname = hostProps.get(\"system.hostname\");\n//Get processes from property\ndef processesProp = hostProps.get(\"processes\");\n//cast as array of Strings\ndef processes = processesProp.split(\",\")\n\n// Choose the oid to walk, need combo of both\ndef oid1 = \"1.3.6.1.2.1.25.4.2.1.4\";\ndef oid2 = \"1.3.6.1.2.1.25.4.2.1.5\";\n \n// Walk both oids\ndef oidOneWalk = Snmp.walk(hostname, oid1);\ndef oidTwoWalk = Snmp.walk(hostname, oid2);\n\n// combine all processes into single list\ncombinedWalk = oidOneWalk + oidTwoWalk\ndef list = combinedWalk.readLines();\n\n// Make a map to store results in\ndef results = [:];\n \n// Loop through the returned lines\nlist.each\n{ line->\n\t \n\t// Split the result\n\ttokens = line.split(\"=\");\n\n\t// Check that the path has the processToMonitor in it\n\tprocesses.each\n\t{ process->\n\t\tif(tokens.last().toLowerCase().contains(process.toLowerCase()))\n\t\t{\n\t\t\tdef result = results[tokens.last().split(\"/\").last()];\n\t\t   \n\t\t\t// Check to see if this result isnt in the map\n\t\t\tif(result == null)\n\t\t\t{\n\t\t\t\t// Create a list for theoids to go in\n\t\t\t  result = [];\n\t\t\t}\n\t\t\t // Add the oid to the list in the result\n\t\t\tresult.add(tokens.first().split(\"\\\\.\").last().trim());\n\n\t\t\t// Add this result to the Map\n\t\t\tresults[tokens.last().split(\"/\").last()] = result;\n\t\t}\n\t}\n}\n\n\n// Loop through all results\nresults.each\n{\n    key, value ->\n   \n    // Print the results in the standard AD format\n    println(value.join(',') + \"##\" + key);\n}\n \nreturn 0;"}}]]></adlist>
+        <schemaVersion>2</schemaVersion>
+        <dataSourceType>1</dataSourceType>
+        <attributes>
+        <attribute>
+            <name>scripttype</name>
+            <value>embed</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>scriptgroovy</name>
+            <value>import com.santaba.agent.groovyapi.snmp.Snmp;
+ 
+//Get the Wildvalue and  Hostname
+def hostname = &#34;##HOSTNAME##&#34;;
+def wildvalue = &#34;##WILDVALUE##&#34;;
+ 
+ // Split out oids back up from the list we sent them in via the AD script
+def wildvalues = wildvalue.split(&#34;,&#34;);
+ 
+// Make some counters to join the info from many datasources
+def cpu = 0;
+def mem = 0;
+def status = 10;
+def processes = wildvalues.length;
+
+// Loop through each oid
+wildvalues.each
+{
+    value -&#62;
+
+    // Walk the oids we need data from, and add them to our counters
+    cpu += Snmp.get(hostname, &#34;.1.3.6.1.2.1.25.5.1.1.1.&#34; + value).toInteger();
+    mem += Snmp.get(hostname, &#34;.1.3.6.1.2.1.25.5.1.1.2.&#34; + value).toInteger();
+    status = Math.min(status, Snmp.get(hostname, &#34;.1.3.6.1.2.1.25.4.2.1.7.&#34; + value).toInteger());
+}
+
+// Print off the counters so our datapoints can pick them up
+println(&#34;CPU=&#34; + cpu);
+println(&#34;Memory=&#34; + mem);
+println(&#34;MatchingProcesses=&#34; + processes);
+println(&#34;MinStatus=&#34; + status);</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>windowsscript</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>linuxscript</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>windowscmdline</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>linuxcmdline</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>properties</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        </attributes>
+        <datapoints>
+        <datapoint>
+            <name>CPU</name>
+            <originId></originId>
+            <dataType>7</dataType>
+            <type>3</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>CPU</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description></description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>5</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>MatchingProcesses</name>
+            <originId></originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>MatchingProcesses</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>The count of the processes which match the path and parameter</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>5</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>Memory</name>
+            <originId></originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>memory</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description></description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>5</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>MinStatus</name>
+            <originId></originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>Minstatus</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr>&#62; 2 2</alertexpr>
+            <alertmissing>2</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description></description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>5</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        </datapoints>
+        <graphs>
+        <graph>
+            <name>CPU time of process</name>
+            <title>CPU time of process</title>
+            <originId></originId>            <verticallabel>milliseconds of CPU time/second</verticallabel>
+            <rigid>true</rigid>
+            <maxvalue>NaN</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>1</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>CPU</name>
+            <datapointname>CPU</datapointname>
+            <originId></originId>
+            <cf>1</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+        <graphvirtualdatapoint>
+            <name>MillisecCPU</name>
+            <rpn>CPU*10</rpn>
+            <originId></originId>
+        </graphvirtualdatapoint>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>1</type>
+                <legend>CPU</legend>
+                <color>blue</color>
+                <datapointname>MillisecCPU</datapointname>
+                <isvirtualdatapoint>true</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        <graph>
+            <name>MatchingProcesses</name>
+            <title>MatchingProcesses</title>
+            <originId></originId>            <verticallabel>count</verticallabel>
+            <rigid>true</rigid>
+            <maxvalue>NaN</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>1</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>MatchingProcesses</name>
+            <datapointname>MatchingProcesses</datapointname>
+            <originId></originId>
+            <cf>1</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>1</type>
+                <legend>MatchingProcesses</legend>
+                <color>blue</color>
+                <datapointname>MatchingProcesses</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        <graph>
+            <name>Memory</name>
+            <title>Memory</title>
+            <originId></originId>            <verticallabel>MB</verticallabel>
+            <rigid>true</rigid>
+            <maxvalue>NaN</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>1</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>Memory</name>
+            <datapointname>Memory</datapointname>
+            <originId></originId>
+            <cf>1</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+        <graphvirtualdatapoint>
+            <name>MemoryBytes</name>
+            <rpn>Memory/1024</rpn>
+            <originId></originId>
+        </graphvirtualdatapoint>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>1</type>
+                <legend>Memory</legend>
+                <color>blue</color>
+                <datapointname>MemoryBytes</datapointname>
+                <isvirtualdatapoint>true</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        <graph>
+            <name>Process State</name>
+            <title>Process State</title>
+            <originId></originId>            <verticallabel>State</verticallabel>
+            <rigid>true</rigid>
+            <maxvalue>NaN</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>1</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>Status</name>
+            <datapointname>MinStatus</datapointname>
+            <originId></originId>
+            <cf>1</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>1</type>
+                <legend>Status: 1 = running; 2 = runnable; 3= not Runnable; 4= invalid</legend>
+                <color>blue</color>
+                <datapointname>Status</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        </graphs>
+        <overviewgraphs>
+        </overviewgraphs>
+        <scripts>
+        </scripts>
+    </entry>
+</feed>
