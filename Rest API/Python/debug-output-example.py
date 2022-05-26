@@ -12,19 +12,22 @@ AccessId =''
 AccessKey =''
 Company = ''
 
+collectorId = ''
+
 #Request Info
-httpVerb ='GET'
-resourcePath = '/device/devices'
-data = ''
+httpVerb = 'POST'
+resourcePath = '/debug/'
+data = '{"cmdline":"help"}'
+queryParams = '?collectorId=' + collectorId
 
 #Construct URL 
-url = 'https://'+ Company +'.logicmonitor.com/santaba/rest' + resourcePath
+url = 'https://'+ Company +'.logicmonitor.com/santaba/rest' + resourcePath + queryParams
 
 #Get current time in milliseconds
 epoch = str(int(time.time() * 1000))
 
 #Concatenate Request details
-requestVars = httpVerb + epoch + data + resourcePath
+requestVars = httpVerb + epoch + data + resourcePath 
 
 #Construct signature
 digest = hmac.new(
@@ -36,11 +39,12 @@ signature = base64.b64encode(digest.encode('utf-8')).decode('utf-8')
 
 #Construct headers
 auth = 'LMv1 ' + AccessId + ':' + str(signature) + ':' + epoch
-headers = {'Content-Type':'application/json','Authorization':auth,'X-Version':'2'}
+headers = {'Content-Type':'application/json','Authorization':auth,'X-Version':'3'}
 
 #Make request
-response = requests.get(url, data=data, headers=headers)
+response = requests.post(url, data=data, headers=headers)
 
 #Print status and body of response
+print(httpVerb + ' ' + url)
 print('Response Status:',response.status_code)
 print('Response Body:',response.content)
