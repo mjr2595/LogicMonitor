@@ -12,13 +12,11 @@ AccessId =''
 AccessKey =''
 Company = ''
 
-collectorId = '8'
-
 #Request Info
 httpVerb = 'POST'
-resourcePath = '/device/devices'
-data = '{"cmdline":"help"}'
-queryParams = "?collectorId=" + collectorId
+resourcePath = '/log/ingest'
+data = '{msg: "user john logged in",timestamp: 1582555792,_lm.resourceId: {system.deviceId: "281"},host: "systemY",username: "john",type_of_auth: "oauth"}'
+queryParams = ''
 
 #Construct URL 
 url = 'https://'+ Company +'.logicmonitor.com/santaba/rest' + resourcePath + queryParams
