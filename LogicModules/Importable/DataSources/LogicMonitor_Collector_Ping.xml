@@ -5,14 +5,15 @@
   <errmsg>OK</errmsg>
   <interval>0</interval>
     <entry type="predatasource">
-        <version>1509699764</version>
+        <version>1656093292</version>
         <name>LogicMonitor_Collector_Ping</name>
         <displayedas>LogicMonitor_Collector_Ping</displayedas>
         <description>use the javaping/sbproxyping/systemping to compare</description>
         <collector>script</collector>
         <hasMultiInstances>false</hasMultiInstances>
+        <useWildValueAsUniqueIdentifier>false</useWildValueAsUniqueIdentifier>
         <schedule>120</schedule>
-        <appliesTo>false()</appliesTo>
+        <appliesTo>isCollectorDevice()</appliesTo>
         <wildcardauto>false</wildcardauto>
         <wildcardpersist>false</wildcardpersist>
         <wildcardlinuxscript></wildcardlinuxscript>
@@ -27,7 +28,7 @@
         <agdparams></agdparams>
         <group>Collector</group>
         <tags></tags>
-        <technology>lmsupport create this</technology>
+        <technology>lmsupport created this for troubleshooting purposes. Default AppliesTo is for all Collectors, but you should apply this to any devices having issues with ping.</technology>
         <adlist><![CDATA[{"agdmethod":"none","agdparams":"","id":0,"filters":[],"params":{}}]]></adlist>
         <schemaVersion>2</schemaVersion>
         <dataSourceType>1</dataSourceType>
@@ -187,10 +188,16 @@ return 0;</value>
             <value></value>
             <comment></comment>
         </attribute>
+        <attribute>
+            <name>properties</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
         </attributes>
         <datapoints>
         <datapoint>
             <name>javarecv</name>
+            <originId></originId>
             <dataType>7</dataType>
             <type>2</type>
             <postprocessormethod>namevalue</postprocessormethod>
@@ -200,6 +207,11 @@ return 0;</value>
             <alertmissing>1</alertmissing>
             <alertsubject></alertsubject>
             <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
             <description></description>
             <maxvalue></maxvalue>
             <minvalue></minvalue>
@@ -213,6 +225,7 @@ return 0;</value>
         </datapoint>
         <datapoint>
             <name>javasend</name>
+            <originId></originId>
             <dataType>7</dataType>
             <type>2</type>
             <postprocessormethod>namevalue</postprocessormethod>
@@ -222,6 +235,11 @@ return 0;</value>
             <alertmissing>1</alertmissing>
             <alertsubject></alertsubject>
             <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
             <description></description>
             <maxvalue></maxvalue>
             <minvalue></minvalue>
@@ -235,6 +253,7 @@ return 0;</value>
         </datapoint>
         <datapoint>
             <name>proxyrecv</name>
+            <originId></originId>
             <dataType>7</dataType>
             <type>2</type>
             <postprocessormethod>namevalue</postprocessormethod>
@@ -244,6 +263,11 @@ return 0;</value>
             <alertmissing>1</alertmissing>
             <alertsubject></alertsubject>
             <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
             <description></description>
             <maxvalue></maxvalue>
             <minvalue></minvalue>
@@ -257,6 +281,7 @@ return 0;</value>
         </datapoint>
         <datapoint>
             <name>proxysend</name>
+            <originId></originId>
             <dataType>7</dataType>
             <type>2</type>
             <postprocessormethod>namevalue</postprocessormethod>
@@ -266,6 +291,11 @@ return 0;</value>
             <alertmissing>1</alertmissing>
             <alertsubject></alertsubject>
             <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
             <description></description>
             <maxvalue></maxvalue>
             <minvalue></minvalue>
@@ -279,6 +309,7 @@ return 0;</value>
         </datapoint>
         <datapoint>
             <name>systemrecv</name>
+            <originId></originId>
             <dataType>7</dataType>
             <type>2</type>
             <postprocessormethod>namevalue</postprocessormethod>
@@ -288,6 +319,11 @@ return 0;</value>
             <alertmissing>1</alertmissing>
             <alertsubject></alertsubject>
             <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
             <description></description>
             <maxvalue></maxvalue>
             <minvalue></minvalue>
@@ -301,6 +337,7 @@ return 0;</value>
         </datapoint>
         <datapoint>
             <name>systemsend</name>
+            <originId></originId>
             <dataType>7</dataType>
             <type>2</type>
             <postprocessormethod>namevalue</postprocessormethod>
@@ -310,6 +347,11 @@ return 0;</value>
             <alertmissing>1</alertmissing>
             <alertsubject></alertsubject>
             <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
             <description></description>
             <maxvalue></maxvalue>
             <minvalue></minvalue>
@@ -323,6 +365,7 @@ return 0;</value>
         </datapoint>
         <datapoint>
             <name>javaavgrtt</name>
+            <originId></originId>
             <dataType>7</dataType>
             <type>2</type>
             <postprocessormethod>namevalue</postprocessormethod>
@@ -332,6 +375,11 @@ return 0;</value>
             <alertmissing>1</alertmissing>
             <alertsubject></alertsubject>
             <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
             <description>java avg rtt</description>
             <maxvalue></maxvalue>
             <minvalue></minvalue>
@@ -345,6 +393,7 @@ return 0;</value>
         </datapoint>
         <datapoint>
             <name>javaminrtt</name>
+            <originId></originId>
             <dataType>7</dataType>
             <type>2</type>
             <postprocessormethod>namevalue</postprocessormethod>
@@ -354,6 +403,11 @@ return 0;</value>
             <alertmissing>1</alertmissing>
             <alertsubject></alertsubject>
             <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
             <description></description>
             <maxvalue></maxvalue>
             <minvalue></minvalue>
@@ -367,6 +421,7 @@ return 0;</value>
         </datapoint>
         <datapoint>
             <name>proxyminrtt</name>
+            <originId></originId>
             <dataType>7</dataType>
             <type>2</type>
             <postprocessormethod>namevalue</postprocessormethod>
@@ -376,6 +431,11 @@ return 0;</value>
             <alertmissing>1</alertmissing>
             <alertsubject></alertsubject>
             <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
             <description></description>
             <maxvalue></maxvalue>
             <minvalue></minvalue>
@@ -389,6 +449,7 @@ return 0;</value>
         </datapoint>
         <datapoint>
             <name>javamaxrtt</name>
+            <originId></originId>
             <dataType>7</dataType>
             <type>2</type>
             <postprocessormethod>namevalue</postprocessormethod>
@@ -398,6 +459,11 @@ return 0;</value>
             <alertmissing>1</alertmissing>
             <alertsubject></alertsubject>
             <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
             <description>java max rtt</description>
             <maxvalue></maxvalue>
             <minvalue></minvalue>
@@ -411,6 +477,7 @@ return 0;</value>
         </datapoint>
         <datapoint>
             <name>proxyavgrtt</name>
+            <originId></originId>
             <dataType>7</dataType>
             <type>2</type>
             <postprocessormethod>namevalue</postprocessormethod>
@@ -420,6 +487,11 @@ return 0;</value>
             <alertmissing>1</alertmissing>
             <alertsubject></alertsubject>
             <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
             <description></description>
             <maxvalue></maxvalue>
             <minvalue></minvalue>
@@ -433,6 +505,7 @@ return 0;</value>
         </datapoint>
         <datapoint>
             <name>proxymaxrtt</name>
+            <originId></originId>
             <dataType>7</dataType>
             <type>2</type>
             <postprocessormethod>namevalue</postprocessormethod>
@@ -442,6 +515,11 @@ return 0;</value>
             <alertmissing>1</alertmissing>
             <alertsubject></alertsubject>
             <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
             <description></description>
             <maxvalue></maxvalue>
             <minvalue></minvalue>
@@ -455,6 +533,7 @@ return 0;</value>
         </datapoint>
         <datapoint>
             <name>systemavgrtt</name>
+            <originId></originId>
             <dataType>7</dataType>
             <type>2</type>
             <postprocessormethod>namevalue</postprocessormethod>
@@ -464,6 +543,11 @@ return 0;</value>
             <alertmissing>1</alertmissing>
             <alertsubject></alertsubject>
             <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
             <description></description>
             <maxvalue></maxvalue>
             <minvalue></minvalue>
@@ -477,6 +561,7 @@ return 0;</value>
         </datapoint>
         <datapoint>
             <name>systemmaxrtt</name>
+            <originId></originId>
             <dataType>7</dataType>
             <type>2</type>
             <postprocessormethod>namevalue</postprocessormethod>
@@ -486,6 +571,11 @@ return 0;</value>
             <alertmissing>1</alertmissing>
             <alertsubject></alertsubject>
             <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
             <description></description>
             <maxvalue></maxvalue>
             <minvalue></minvalue>
@@ -499,6 +589,7 @@ return 0;</value>
         </datapoint>
         <datapoint>
             <name>systemminrtt</name>
+            <originId></originId>
             <dataType>7</dataType>
             <type>2</type>
             <postprocessormethod>namevalue</postprocessormethod>
@@ -508,6 +599,11 @@ return 0;</value>
             <alertmissing>1</alertmissing>
             <alertsubject></alertsubject>
             <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
             <description></description>
             <maxvalue></maxvalue>
             <minvalue></minvalue>
@@ -524,7 +620,7 @@ return 0;</value>
         <graph>
             <name>Lost packets</name>
             <title>Lost packets</title>
-            <verticallabel>#</verticallabel>
+            <originId></originId>            <verticallabel>#</verticallabel>
             <rigid>false</rigid>
             <maxvalue>NaN</maxvalue>
             <minvalue>NaN</minvalue>
@@ -535,31 +631,37 @@ return 0;</value>
         <graphdatapoint>
             <name>javarecv</name>
             <datapointname>javarecv</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
         <graphdatapoint>
             <name>javasend</name>
             <datapointname>javasend</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
         <graphdatapoint>
             <name>proxyrecv</name>
             <datapointname>proxyrecv</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
         <graphdatapoint>
             <name>proxysend</name>
             <datapointname>proxysend</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
         <graphdatapoint>
             <name>systemrecv</name>
             <datapointname>systemrecv</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
         <graphdatapoint>
             <name>systemsend</name>
             <datapointname>systemsend</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
             </graphdatapoints>
@@ -567,14 +669,17 @@ return 0;</value>
         <graphvirtualdatapoint>
             <name>javaloss</name>
             <rpn>javasend-javarecv</rpn>
+            <originId></originId>
         </graphvirtualdatapoint>
         <graphvirtualdatapoint>
             <name>proxyloss</name>
             <rpn>proxysend-proxyrecv</rpn>
+            <originId></originId>
         </graphvirtualdatapoint>
         <graphvirtualdatapoint>
             <name>systemloss</name>
             <rpn>systemsend-systemrecv</rpn>
+            <originId></originId>
         </graphvirtualdatapoint>
             </graphvirtualdatapoints>
             <graphdatas>
@@ -604,7 +709,7 @@ return 0;</value>
         <graph>
             <name>rtt</name>
             <title>rtt</title>
-            <verticallabel>ms</verticallabel>
+            <originId></originId>            <verticallabel>ms</verticallabel>
             <rigid>false</rigid>
             <maxvalue>NaN</maxvalue>
             <minvalue>NaN</minvalue>
@@ -615,46 +720,55 @@ return 0;</value>
         <graphdatapoint>
             <name>javaavgrtt</name>
             <datapointname>javaavgrtt</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
         <graphdatapoint>
             <name>javamaxrtt</name>
             <datapointname>javamaxrtt</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
         <graphdatapoint>
             <name>javaminrtt</name>
             <datapointname>javaminrtt</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
         <graphdatapoint>
             <name>proxyavgrtt</name>
             <datapointname>proxyavgrtt</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
         <graphdatapoint>
             <name>proxymaxrtt</name>
             <datapointname>proxymaxrtt</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
         <graphdatapoint>
             <name>proxyminrtt</name>
             <datapointname>proxyminrtt</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
         <graphdatapoint>
             <name>systemavgrtt</name>
             <datapointname>systemavgrtt</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
         <graphdatapoint>
             <name>systemmaxrtt</name>
             <datapointname>systemmaxrtt</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
         <graphdatapoint>
             <name>systemminrtt</name>
             <datapointname>systemminrtt</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
             </graphdatapoints>
@@ -729,7 +843,7 @@ return 0;</value>
         <graph>
             <name>SendRecv</name>
             <title>Send_Recv</title>
-            <verticallabel>#packets</verticallabel>
+            <originId></originId>            <verticallabel>#packets</verticallabel>
             <rigid>false</rigid>
             <maxvalue>NaN</maxvalue>
             <minvalue>NaN</minvalue>
@@ -740,31 +854,37 @@ return 0;</value>
         <graphdatapoint>
             <name>javarecv</name>
             <datapointname>javarecv</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
         <graphdatapoint>
             <name>javasend</name>
             <datapointname>javasend</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
         <graphdatapoint>
             <name>proxyrecv</name>
             <datapointname>proxyrecv</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
         <graphdatapoint>
             <name>proxysend</name>
             <datapointname>proxysend</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
         <graphdatapoint>
             <name>systemrecv</name>
             <datapointname>systemrecv</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
         <graphdatapoint>
             <name>systemsend</name>
             <datapointname>systemsend</datapointname>
+            <originId></originId>
             <cf>1</cf>
         </graphdatapoint>
             </graphdatapoints>
