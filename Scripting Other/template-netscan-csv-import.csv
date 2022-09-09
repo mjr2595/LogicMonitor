@@ -1,0 +1,5 @@
+IP,displayname,hostgroup,properties
+10.0.0.10,Device from CSV,New Target Group,"prop.one=firstproperty
+prop.two=secondproperty"
+10.0.0.11,Another Device from CSV,New Target Group,"prop.one=firstproperties
+prop.two=secondproperties"
