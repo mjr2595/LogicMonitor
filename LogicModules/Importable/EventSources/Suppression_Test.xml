@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<feed  version="1.0" hasPendingRequests="false" >
+  <company></company>
+  <status>200</status>
+  <errmsg>OK</errmsg>
+  <interval>0</interval>
+    <entry type="preeventsource">
+        <version>1671123936</version>
+        <name>Suppression Test</name>
+        <description>testing duplication of scripted events</description>
+        <group></group>
+        <alertlevel>2</alertlevel>
+        <appliesto>isLinux()</appliesto>
+        <collector>scriptevent</collector>
+        <alertsubjecttemplate></alertsubjecttemplate>
+        <alertbodytemplate></alertbodytemplate>
+        <alerteffectiveival>60</alerteffectiveival>
+        <clearafterack>true</clearafterack>
+        <suppressduplicates>true</suppressduplicates>
+        <suppressduplicateses>true</suppressduplicateses>
+        <tags></tags>
+        <technology></technology>
+        <doMapping>true</doMapping>
+        <schemaVersion>3</schemaVersion>
+        <params>
+        <preeventsourceparam>
+            <name>scripttype</name>
+            <value>embed</value>
+            <comment>embed</comment>
+        </preeventsourceparam>
+        <preeventsourceparam>
+            <name>scriptgroovy</name>
+            <value>import java.text.SimpleDateFormat
+import groovy.json.JsonOutput
+
+def dateTime = new Date()
+def simpleDateFormat = new SimpleDateFormat(&#34;mm&#34;)
+def minutes = simpleDateFormat.format(dateTime)
+def dateFormatted = dateTime.format(&#39;EEE MMM dd HH:mm:ss z yyyy&#39;, TimeZone.getTimeZone(&#39;UTC&#39;))
+
+data = [
+       &#34;events&#34;: [
+           [
+               &#34;happenedOn&#34;: dateFormatted,
+               &#34;eventlog.sequenceNumber&#34;: 3360,
+               &#34;severity&#34;: &#34;WARN&#34;,
+               &#34;message&#34;: &#34;SAS discovery occurred, configuration changes pending&#34;,
+               &#34;eventlog.eventId&#34;: &#34;981100&#34;,
+               &#34;eventlog.errorCode&#34;: &#34;&#34;
+           ],
+           [
+               &#34;happenedOn&#34;: dateFormatted,
+               &#34;eventlog.sequenceNumber&#34;: 3361,
+               &#34;severity&#34;: &#34;WARN&#34;,
+               &#34;message&#34;: &#34;SAS discovery occurred, configuration changes pending&#34;,
+               &#34;eventlog.eventId&#34;: &#34;981101&#34;,
+               &#34;eventlog.errorCode&#34;: &#34;&#34;
+           ]
+       ]
+   ]
+
+   
+def json = JsonOutput.toJson(data)
+println json
+
+return 0</value>
+            <comment></comment>
+        </preeventsourceparam>
+        <preeventsourceparam>
+            <name>windowsscript</name>
+            <value></value>
+            <comment></comment>
+        </preeventsourceparam>
+        <preeventsourceparam>
+            <name>linuxscript</name>
+            <value></value>
+            <comment></comment>
+        </preeventsourceparam>
+        <preeventsourceparam>
+            <name>windowscmdline</name>
+            <value></value>
+            <comment></comment>
+        </preeventsourceparam>
+        <preeventsourceparam>
+            <name>linuxcmdline</name>
+            <value></value>
+            <comment></comment>
+        </preeventsourceparam>
+        <preeventsourceparam>
+            <name>schedule</name>
+            <value>60</value>
+            <comment>180</comment>
+        </preeventsourceparam>
+        </params>
+        <filters>
+        </filters>
+        <scripts>
+        </scripts>
+    </entry>
+</feed>

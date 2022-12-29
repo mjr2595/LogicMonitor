@@ -1,0 +1,355 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<feed  version="1.0" hasPendingRequests="false" >
+  <company></company>
+  <status>200</status>
+  <errmsg>OK</errmsg>
+  <interval>0</interval>
+    <entry type="predatasource">
+        <version>1671044968</version>
+        <name>MSSQL_Backup_Check</name>
+        <displayedas>MSSQL Backup Check</displayedas>
+        <description>Provides Active Discovery by discovering all databases available for a MSSQL Instance on a preconfigured port.  Checks for the number of minutes since the MS SQL backup last ran for each discovered database.</description>
+        <collector>script</collector>
+        <hasMultiInstances>true</hasMultiInstances>
+        <useWildValueAsUniqueIdentifier>false</useWildValueAsUniqueIdentifier>
+        <schedule>300</schedule>
+        <appliesTo>exists(&#34;lmce.mssql.port&#34;)</appliesTo>
+        <wildcardauto>true</wildcardauto>
+        <wildcardpersist>false</wildcardpersist>
+        <wildcardlinuxscript>ad_script</wildcardlinuxscript>
+        <wildcardlinuxcmdline>type=&#34;embeded&#34; </wildcardlinuxcmdline>
+        <wildcardwinscript>ad_script</wildcardwinscript>
+        <wildcardwincmdline>type=&#34;embeded&#34; </wildcardwincmdline>
+        <wildcardgroovyscript>// Import the groovy Sql class
+
+import groovy.sql.Sql
+
+
+/*
+
+Returns:
+
+    0 = Success or known failure
+
+    1 = Unknown failure
+
+*/
+
+
+final int returnSuccess = 0;
+
+final int returnFailure = 1;
+
+
+// Provide a try/catch routine around the entire code block
+
+// Return 0 if successful or 1 for any failure
+
+
+try
+
+ {
+
+    // Obtain LogicMonitor device properties for lmce.mssql.port and system.hostname
+
+    def sqlPort = hostProps.get(&#34;lmce.mssql.port&#34;);
+
+    def hostName = hostProps.get(&#34;system.hostname&#34;);
+
+
+        // Create a new integrated security connection using the newInstance method
+
+        def sql = Sql.newInstance(&#34;jdbc:sqlserver://${hostName}:${sqlPort};integratedSecurity=true;&#34;);
+
+
+    // Use the eachRow method to obtain a list of databases from the MSSQL Instance
+
+    // put the proper query in here
+
+        sql.eachRow(&#34;select name from sys.databases&#34;) //FIX THIS: Hint, look at what you did in the Collector debug console at the beginning of this activity
+
+        {   database -&#62;
+
+             // For each database found, return the WildValue and WildAlias values required for Active Discovery, separated by ##
+
+                println &#34;${sqlPort}:${database.name}##${database.name}&#34;;
+
+        }
+
+
+    // Close the MSSQL connection
+
+    sql.close();
+
+   
+
+    // Return success - Active Discovery will not populate discovered instances unless a 0 is returned
+
+    return returnSuccess;
+
+}
+
+catch (Exception e)
+
+{
+
+    // Return the error message for debug
+
+    println &#34;DataSource Active Discovery failed with error: ${e.getMessage()}&#34;;
+
+   
+
+    // Return failure - always 1
+
+    return returnFailure;  
+
+ }</wildcardgroovyscript>
+        <wildcardschedule>0</wildcardschedule>
+        <wildcarddisable>false</wildcarddisable>
+        <wildcarddeleteinactive>true</wildcarddeleteinactive>
+        <agdmethod>none</agdmethod>
+        <agdparams></agdparams>
+        <group></group>
+        <tags></tags>
+        <technology>Requires lmce.mssql.port system property to be provided for any device that requires monitoring, using a default port value of 1433</technology>
+        <adlist><![CDATA[{"agdmethod":"none","method":"ad_script","agdparams":"","id":0,"filters":[{"attribute":"##WILDALIAS##","operation":"NotEqual","value":"tempdb"}],"params":{"type":"embeded","groovyscript":"// Import the groovy Sql class\n\nimport groovy.sql.Sql\n\n\n/*\n\nReturns:\n\n    0 = Success or known failure\n\n    1 = Unknown failure\n\n*/\n\n\nfinal int returnSuccess = 0;\n\nfinal int returnFailure = 1;\n\n\n// Provide a try/catch routine around the entire code block\n\n// Return 0 if successful or 1 for any failure\n\n\ntry\n\n {\n\n    // Obtain LogicMonitor device properties for lmce.mssql.port and system.hostname\n\n    def sqlPort = hostProps.get(\"lmce.mssql.port\");\n\n    def hostName = hostProps.get(\"system.hostname\");\n\n\n        // Create a new integrated security connection using the newInstance method\n\n        def sql = Sql.newInstance(\"jdbc:sqlserver://${hostName}:${sqlPort};integratedSecurity=true;\");\n\n\n    // Use the eachRow method to obtain a list of databases from the MSSQL Instance\n\n    // put the proper query in here\n\n        sql.eachRow(\"select name from sys.databases\") //FIX THIS: Hint, look at what you did in the Collector debug console at the beginning of this activity\n\n        {   database ->\n\n             // For each database found, return the WildValue and WildAlias values required for Active Discovery, separated by ##\n\n                println \"${sqlPort}:${database.name}##${database.name}\";\n\n        }\n\n\n    // Close the MSSQL connection\n\n    sql.close();\n\n   \n\n    // Return success - Active Discovery will not populate discovered instances unless a 0 is returned\n\n    return returnSuccess;\n\n}\n\ncatch (Exception e)\n\n{\n\n    // Return the error message for debug\n\n    println \"DataSource Active Discovery failed with error: ${e.getMessage()}\";\n\n   \n\n    // Return failure - always 1\n\n    return returnFailure;  \n\n }"}}]]></adlist>
+        <schemaVersion>2</schemaVersion>
+        <dataSourceType>1</dataSourceType>
+        <attributes>
+        <attribute>
+            <name>scripttype</name>
+            <value>embed</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>scriptgroovy</name>
+            <value>// Import the groovy Sql class
+
+import groovy.sql.Sql
+
+
+/*
+
+Returns:
+
+    0 = Success or known failure
+
+    1 = Unknown failure
+
+*/
+
+
+final int returnSuccess = 0;
+
+final int returnFailure = 1;
+
+
+// Provide a try/catch routine around the entire code block
+
+// Return 0 if successful or 1 for any failure
+
+
+try
+
+{
+
+    // Obtain LogicMonitor instance property for WildValue and device property system.hostname
+
+    def wildValue = instanceProps.get(&#34;wildvalue&#34;);
+
+    def hostname = hostProps.get(&#34;system.hostname&#34;);
+
+
+    // fix these next two lines
+
+    String sqlPort = wildValue.split(&#34;:&#34;)[0];  // Fix this index to pull out the port number
+
+    String database = wildValue.split(&#34;:&#34;)[1]; // Fix this index to pull out the database name
+
+   
+
+    // Create a new integrated security connection using the newInstance method, noting that database msdb contains the backup statistics
+
+    //fix this line to use integrated security, hint, there is an example of this on the support page
+    def sql = Sql.newInstance(&#34;jdbc:sqlserver://${hostname}:${sqlPort};database=msdb;integratedSecurity=true;&#34;);
+
+
+    // Use the firstRow method to obtain the first row returned from the MSSQL select statement (the latest backup start date)
+
+    def minutes = sql.firstRow(&#34;&#34;&#34;
+
+
+select datediff(MINUTE,(SELECT TOP 1 s.backup_start_date FROM msdb.dbo.backupset s WHERE s.database_name =&#39;${database}&#39; and s.type in (&#39;D&#39;,&#39;I&#39;) ORDER BY backup_start_date DESC, backup_finish_date),Getdate())
+
+
+&#34;&#34;&#34;.replaceAll(&#34;\n&#34;,&#34;&#34;));
+
+
+    // Convert the result to a String Variable
+
+    String minutesSinceStart = minutes;
+
+
+    //  The result is in the form &#34;{=9999}&#34;, so remove the braces and = sign, noting the need to escape { and }
+
+    minutesSinceStart = minutesSinceStart.replaceAll(&#34;\\{=&#34;,&#34;&#34;).replaceAll(&#34;\\}&#34;,&#34;&#34;);
+
+
+    // Return the result to LogicMonitor as a Key Value pair - the datapoint will be configured to accept a Key Value pair
+
+    println &#34;minutesSinceStart:${minutesSinceStart}&#34;;
+
+
+    // Close the MSSQL connection
+
+    sql.close();
+
+    return returnSuccess;
+
+}
+
+catch (Exception e)
+
+{
+
+    // Return the error message for debug
+
+    println &#34;DataSource Collection failed with error: ${e.getMessage()}&#34;;
+
+    return returnFailure;
+
+}</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>windowsscript</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>linuxscript</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>windowscmdline</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>linuxcmdline</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>properties</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>__filter_0</name>
+            <value>##WILDALIAS##	NotEqual	tempdb</value>
+            <comment></comment>
+        </attribute>
+        </attributes>
+        <datapoints>
+        <datapoint>
+            <name>minutesSinceStart</name>
+            <originId>dHgR29YyTfu1b2Eevj9ohg</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>minutesSinceStart</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>The number of minutes since the database backup last started</description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        </datapoints>
+        <graphs>
+        <graph>
+            <name>Minutes Since Start</name>
+            <title>Backup Minutes Since Start for ##INSTANCE##</title>
+            <originId></originId>            <verticallabel>minutes</verticallabel>
+            <rigid>false</rigid>
+            <maxvalue>NaN</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>1</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>minutesSinceStart</name>
+            <datapointname>minutesSinceStart</datapointname>
+            <originId></originId>
+            <cf>1</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>1</type>
+                <legend>Minutes Since Start</legend>
+                <color>silver</color>
+                <datapointname>minutesSinceStart</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        </graphs>
+        <overviewgraphs>
+        <overviewgraph>
+            <name>Minutes Since Start</name>
+            <title>Minutes Since Start</title>
+            <verticallabel>minutes</verticallabel>
+            <rigid>false</rigid>
+            <maxvalue>NaN</maxvalue>
+            <minvalue>NaN</minvalue>
+            <displayprio>1</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <aggregated>false</aggregated>
+            <originId></originId>
+            <datapoints>
+        <overviewgraphdatapoint>
+            <name>minutesSinceStart</name>
+            <datapointname>minutesSinceStart</datapointname>
+            <cf>1</cf>
+            <aggregateMethod>sum</aggregateMethod>
+            <originId></originId>
+        </overviewgraphdatapoint>
+            </datapoints>
+            <virtualdatapoints>
+            </virtualdatapoints>
+            <lines>
+            <overviewgraphline>
+                <type>1</type>
+                <legend>##INSTANCE##</legend>
+                <datapointname>minutesSinceStart</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+                <color>silver</color>
+            </overviewgraphline>
+            </lines>
+        </overviewgraph>
+        </overviewgraphs>
+        <scripts>
+        </scripts>
+    </entry>
+</feed>

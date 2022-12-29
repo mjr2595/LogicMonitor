@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<feed  version="1.0" hasPendingRequests="false" >
+  <company></company>
+  <status>200</status>
+  <errmsg>OK</errmsg>
+  <interval>0</interval>
+    <entry type="preeventsource">
+        <version>1671048423</version>
+        <name>Secure_Log</name>
+        <description>Monitors /var/log/secure</description>
+        <group></group>
+        <alertlevel>2</alertlevel>
+        <appliesto>system.displayname == &#34;Linux Collector&#34;</appliesto>
+        <collector>logfile</collector>
+        <alertsubjecttemplate></alertsubjecttemplate>
+        <alertbodytemplate></alertbodytemplate>
+        <alerteffectiveival>60</alerteffectiveival>
+        <clearafterack>true</clearafterack>
+        <suppressduplicates>true</suppressduplicates>
+        <suppressduplicateses>true</suppressduplicateses>
+        <tags></tags>
+        <technology></technology>
+        <doMapping>true</doMapping>
+        <schemaVersion>3</schemaVersion>
+        <params>
+        <preeventsourceparam>
+            <name>__logfile0</name>
+            <value>{&#34;path&#34;:&#34;/var/log/secure&#34;,&#34;match&#34;:[{&#34;level&#34;:&#34;warn&#34;,&#34;pattern&#34;:&#34;Authentication failure&#34;},{&#34;level&#34;:&#34;error&#34;,&#34;pattern&#34;:&#34;user NOT in sudoers&#34;},{&#34;level&#34;:&#34;critical&#34;,&#34;pattern&#34;:&#34;check pass; user unknown&#34;}],&#34;exclude&#34;:[],&#34;type&#34;:false,&#34;encoding&#34;:&#34;auto&#34;}</value>
+            <comment></comment>
+        </preeventsourceparam>
+        </params>
+        <filters>
+        </filters>
+        <scripts>
+        </scripts>
+    </entry>
+</feed>

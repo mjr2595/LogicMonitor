@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<feed  version="1.0" hasPendingRequests="false" >
+  <company></company>
+  <status>200</status>
+  <errmsg>OK</errmsg>
+  <interval>0</interval>
+    <entry type="predatasource">
+        <version>1671047034</version>
+        <name>Exchange_Rates_BatchScript</name>
+        <displayedas>Exchange Rates BatchScript</displayedas>
+        <description>Obtains Exchange Rate information using BatchScript collection</description>
+        <collector>batchscript</collector>
+        <hasMultiInstances>true</hasMultiInstances>
+        <useWildValueAsUniqueIdentifier>false</useWildValueAsUniqueIdentifier>
+        <schedule>300</schedule>
+        <appliesTo>system.displayname == &#34;api.apilayer.com&#34;</appliesTo>
+        <wildcardauto>true</wildcardauto>
+        <wildcardpersist>true</wildcardpersist>
+        <wildcardlinuxscript>ad_script</wildcardlinuxscript>
+        <wildcardlinuxcmdline>type=&#34;embeded&#34; </wildcardlinuxcmdline>
+        <wildcardwinscript>ad_script</wildcardwinscript>
+        <wildcardwincmdline>type=&#34;embeded&#34; </wildcardwincmdline>
+        <wildcardgroovyscript>import com.santaba.agent.groovyapi.http.*;
+import groovy.json.JsonSlurper;
+import groovy.json.*;
+
+def host = hostProps.get(&#34;system.hostname&#34;);
+def token = hostProps.get(&#34;exchangerate.key&#34;);
+// fetch data from the API using get with headers
+def httpResponse = HTTP.get(&#34;http://${host}/exchangerates_data/latest&#34;,[&#34;apikey&#34;:token]);
+//split body from rest of respoonse with double newline
+def httpBody = httpResponse.split(&#34;\\R\\R\\R&#34;)[1];
+
+
+// create an object to convert the JSON
+def jsonSlurper = new JsonSlurper();
+
+//convert the json to a Groovy object
+def data = jsonSlurper.parseText(httpBody);
+
+// loop through all the items in the response
+data.rates.each() { key, value -&#62;
+    //Change println to print out properly formatted instance list
+	println &#34;${key}##${value}&#34;;
+    //hint https://www.logicmonitor.com/support/logicmodules/datasources/active-discovery/script-active-discovery
+}
+
+//set the proper return code
+
+return 0;</wildcardgroovyscript>
+        <wildcardschedule>15</wildcardschedule>
+        <wildcarddisable>false</wildcarddisable>
+        <wildcarddeleteinactive>true</wildcarddeleteinactive>
+        <agdmethod>none</agdmethod>
+        <agdparams></agdparams>
+        <group></group>
+        <tags></tags>
+        <technology></technology>
+        <adlist><![CDATA[{"agdmethod":"none","method":"ad_script","agdparams":"","id":0,"filters":[],"params":{"type":"embeded","groovyscript":"import com.santaba.agent.groovyapi.http.*;\nimport groovy.json.JsonSlurper;\nimport groovy.json.*;\n\ndef host = hostProps.get(\"system.hostname\");\ndef token = hostProps.get(\"exchangerate.key\");\n// fetch data from the API using get with headers\ndef httpResponse = HTTP.get(\"http://${host}/exchangerates_data/latest\",[\"apikey\":token]);\n//split body from rest of respoonse with double newline\ndef httpBody = httpResponse.split(\"\\\\R\\\\R\\\\R\")[1];\n\n\n// create an object to convert the JSON\ndef jsonSlurper = new JsonSlurper();\n\n//convert the json to a Groovy object\ndef data = jsonSlurper.parseText(httpBody);\n\n// loop through all the items in the response\ndata.rates.each() { key, value ->\n    //Change println to print out properly formatted instance list\n\tprintln \"${key}##${value}\";\n    //hint https://www.logicmonitor.com/support/logicmodules/datasources/active-discovery/script-active-discovery\n}\n\n//set the proper return code\n\nreturn 0;"}}]]></adlist>
+        <schemaVersion>2</schemaVersion>
+        <dataSourceType>1</dataSourceType>
+        <attributes>
+        <attribute>
+            <name>scripttype</name>
+            <value>embed</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>scriptgroovy</name>
+            <value>import com.santaba.agent.groovyapi.http.*;
+import groovy.json.JsonSlurper;
+import groovy.json.*;
+
+def token = hostProps.get(&#34;exchangerate.key&#34;);
+
+// fetch data from the API using get with headers
+
+def httpResponse = HTTP.get(&#34;http://api.apilayer.com/exchangerates_data/latest&#34;,[&#34;apikey&#34;:token]);
+
+//split body from rest of respoonse with double newline
+
+def httpBody = httpResponse.split(&#34;\\R\\R\\R&#34;)[1];
+
+
+def jsonSlurper = new JsonSlurper();
+
+def data = jsonSlurper.parseText(httpBody);
+
+data.rates.each() { key, value -&#62;
+   println &#34;${key}.rate=${value}&#34;; //fix this line
+}
+return 0;</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>windowsscript</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>linuxscript</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>windowscmdline</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>linuxcmdline</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        </attributes>
+        <datapoints>
+        <datapoint>
+            <name>rate</name>
+            <originId>11JCIi4QRrqDxHQf1z_Jww</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.rate</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr>&#62; 10000</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>The Exchange Rate value</description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        </datapoints>
+        <graphs>
+        </graphs>
+        <overviewgraphs>
+        </overviewgraphs>
+        <scripts>
+        </scripts>
+    </entry>
+</feed>

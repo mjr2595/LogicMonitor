@@ -1,0 +1,383 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<feed  version="1.0" hasPendingRequests="false" >
+  <company></company>
+  <status>200</status>
+  <errmsg>OK</errmsg>
+  <interval>0</interval>
+    <entry type="predatasource">
+        <version>1671087622</version>
+        <name>Linux_Volumes_SSH</name>
+        <displayedas>Linux Volumes SSH</displayedas>
+        <description></description>
+        <collector>batchscript</collector>
+        <hasMultiInstances>true</hasMultiInstances>
+        <useWildValueAsUniqueIdentifier>false</useWildValueAsUniqueIdentifier>
+        <schedule>300</schedule>
+        <appliesTo>system.displayname == &#34;mariadb.trainlm.com&#34; &#38;&#38; ssh.user &#38;&#38; ssh.pass</appliesTo>
+        <wildcardauto>true</wildcardauto>
+        <wildcardpersist>false</wildcardpersist>
+        <wildcardlinuxscript>ad_script</wildcardlinuxscript>
+        <wildcardlinuxcmdline>type=&#34;embeded&#34; </wildcardlinuxcmdline>
+        <wildcardwinscript>ad_script</wildcardwinscript>
+        <wildcardwincmdline>type=&#34;embeded&#34; </wildcardwincmdline>
+        <wildcardgroovyscript>import com.santaba.agent.groovyapi.expect.Expect
+def host        = hostProps.get(&#34;system.hostname&#34;)
+def user        = hostProps.get(&#34;ssh.user&#34;) //FILL THIS IN Grab the value of the ssh.user property on the current device
+def pass        = hostProps.get(&#34;ssh.pass&#34;) // Grab the value of the ssh.pass property on the current device
+def timeout     = 10
+def prompt      = /(?-m)[^\n]+\s?[&#62;#$]\s*$/ //FILL THIS IN define a RegEx expression that matches the command prompt
+
+cli = Expect.open(host, user, pass, timeout) // open an ssh connection
+cli.expect(prompt) //  Wait to see the prompt
+cli.send(&#34;df | sed 1d\n&#34;) // FILL THIS IN send the command to display the volumes
+cli.expect(prompt) // Wait to see the prompt
+
+output = cli.before() //collect the output before the previous two expect statements
+output.eachLine() { line -&#62; // Loop through each line
+ t_output = line.tokenize(&#34; &#34;) // Split the current line up into chunks wherever there is one or more spaces
+ fs = t_output[0] // Grab the fileSystem (1st column) from the line
+ if (!(fs=~/df/)){ // Exclude our issued command from showing up in the output
+   mount = t_output[5] // FILL THIS IN Grab the mount point from the line (6th column)
+   // Output the line to create an instance
+   println(&#34;${mount}##${mount}##${mount} on ${fs}####auto.fileSystem=${fs}&#38;auto.1kBlockCount=${t_output[1]}&#34;)
+ }
+}
+cli.send(&#34;exit\n&#34;) // FILL THIS IN logout from the device
+cli.expectClose() // close the ssh connection handle and exit
+return 0 // let LM know that the config was fetched successfully</wildcardgroovyscript>
+        <wildcardschedule>15</wildcardschedule>
+        <wildcarddisable>false</wildcarddisable>
+        <wildcarddeleteinactive>true</wildcarddeleteinactive>
+        <agdmethod>none</agdmethod>
+        <agdparams></agdparams>
+        <group></group>
+        <tags></tags>
+        <technology></technology>
+        <adlist><![CDATA[{"agdmethod":"none","method":"ad_script","agdparams":"","id":0,"filters":[],"params":{"type":"embeded","groovyscript":"import com.santaba.agent.groovyapi.expect.Expect\ndef host        = hostProps.get(\"system.hostname\")\ndef user        = hostProps.get(\"ssh.user\") //FILL THIS IN Grab the value of the ssh.user property on the current device\ndef pass        = hostProps.get(\"ssh.pass\") // Grab the value of the ssh.pass property on the current device\ndef timeout     = 10\ndef prompt      = /(?-m)[^\\n]+\\s?[>#$]\\s*$/ //FILL THIS IN define a RegEx expression that matches the command prompt\n\ncli = Expect.open(host, user, pass, timeout) // open an ssh connection\ncli.expect(prompt) //  Wait to see the prompt\ncli.send(\"df | sed 1d\\n\") // FILL THIS IN send the command to display the volumes\ncli.expect(prompt) // Wait to see the prompt\n\noutput = cli.before() //collect the output before the previous two expect statements\noutput.eachLine() { line -> // Loop through each line\n t_output = line.tokenize(\" \") // Split the current line up into chunks wherever there is one or more spaces\n fs = t_output[0] // Grab the fileSystem (1st column) from the line\n if (!(fs=~/df/)){ // Exclude our issued command from showing up in the output\n   mount = t_output[5] // FILL THIS IN Grab the mount point from the line (6th column)\n   // Output the line to create an instance\n   println(\"${mount}##${mount}##${mount} on ${fs}####auto.fileSystem=${fs}&auto.1kBlockCount=${t_output[1]}\")\n }\n}\ncli.send(\"exit\\n\") // FILL THIS IN logout from the device\ncli.expectClose() // close the ssh connection handle and exit\nreturn 0 // let LM know that the config was fetched successfully"}}]]></adlist>
+        <schemaVersion>2</schemaVersion>
+        <dataSourceType>1</dataSourceType>
+        <attributes>
+        <attribute>
+            <name>scripttype</name>
+            <value>embed</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>scriptgroovy</name>
+            <value>import com.santaba.agent.groovyapi.expect.Expect
+def host        = hostProps.get(&#34;system.hostname&#34;)
+def user        = hostProps.get(&#34;ssh.user&#34;) //FILL THIS IN Grab the value of the ssh.user property on the current device
+def pass        = hostProps.get(&#34;ssh.pass&#34;) // Grab the value of the ssh.pass property on the current device
+def timeout     = 10
+def prompt      = /(?-m)[^\n]+\s?[&#62;#$]\s*$/ //FILL THIS IN define a RegEx expression that matches the command prompt
+
+cli = Expect.open(host, user, pass, timeout) // open an ssh connection
+cli.expect(prompt) //  Wait to see the prompt
+cli.send(&#34;df | sed 1d\n&#34;) // FILL THIS IN send the command to display the volumes
+cli.expect(prompt) // Wait to see the prompt
+
+output = cli.before() //collect the output before the previous two expect statements
+output.eachLine() { line -&#62; // Loop through each line
+ t_output = line.tokenize(&#34; &#34;) // Split the current line up into chunks wherever there is one or more spaces
+ fs = t_output[0] // Grab the fileSystem (1st column) from the line
+ if (!(fs=~/df/)){ // Exclude our issued command from showing up in the output
+	usedKb = t_output[2];
+	availableKb = t_output[3]
+	usedPercent = t_output[4]
+	mount = t_output[5] // FILL THIS IN Grab the mount point from the line (6th column)
+   	totalKb = usedKb + availableKb
+	// Output the line to create an instance
+	println(&#34;${mount}.usedKb:${usedKb}&#34;)
+	println(&#34;${mount}.availableKb:${availableKb}&#34;)
+	println(&#34;${mount}.usedPercent:${usedPercent}&#34;)
+	println(&#34;${mount}.totalKb:${totalKb}&#34;)
+ }	
+}
+cli.send(&#34;exit\n&#34;) // FILL THIS IN logout from the device
+cli.expectClose() // close the ssh connection handle and exit
+return 0 // let LM know that the config was fetched successfully</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>windowsscript</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>linuxscript</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>windowscmdline</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>linuxcmdline</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        </attributes>
+        <datapoints>
+        <datapoint>
+            <name>availableKb</name>
+            <originId>5gNCHr0mQQ-hR06-VIXD3A</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.availableKb</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description></description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>totalKb</name>
+            <originId>a2isyATmTDumE8Y_JgyPnA</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.totalKb</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description></description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>usedKb</name>
+            <originId>OdBcP85kR9W4wkWG1wxh-Q</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.usedKb</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description></description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>usedPercent</name>
+            <originId>duK04OkZT0Swj5yPBiiZrg</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.usedPercent</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description></description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>availableBytes</name>
+            <originId>a-Pjc65DT0uYSLlty6RiYA</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>expression</postprocessormethod>
+            <postprocessorparam>availableKb*1024</postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description></description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>freeKb</name>
+            <originId>TZpqSluwQl6hKIb2xPmKUA</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>expression</postprocessormethod>
+            <postprocessorparam>totalKb-usedKb</postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description></description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>freePercent</name>
+            <originId>4041CHT8Tl66GFCCxkHNHA</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>expression</postprocessormethod>
+            <postprocessorparam>100-usedPercent</postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description></description>
+            <maxvalue>100</maxvalue>
+            <minvalue>0</minvalue>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>totalBytes</name>
+            <originId>kb4fBJDFQ5a9cq1mSfRmIQ</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>expression</postprocessormethod>
+            <postprocessorparam>totalKb*1024</postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description></description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>usedBytes</name>
+            <originId>CPQSE7IJQdyKhp-wWQ8TGQ</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>expression</postprocessormethod>
+            <postprocessorparam>usedKb*1024</postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description></description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        </datapoints>
+        <graphs>
+        </graphs>
+        <overviewgraphs>
+        </overviewgraphs>
+        <scripts>
+        </scripts>
+    </entry>
+</feed>
