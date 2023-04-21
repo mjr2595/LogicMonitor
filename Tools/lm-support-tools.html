@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Dynamic Thresholds Calculator</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 25px;
+      }
+    </style>
+  </head>
+  <body>
+    <div>
+      <h1>LM Support Tools</h1>
+    </div>
+    <div class="tool">
+      <h2>Dynamic Threshold Calculator</h2>
+      <form id="threshold_form">
+        <label for="low_band_value">Low Band Value:</label>
+        <input type="text" id="low_band_value" name="low_band_value" pattern="\d*" required /><br /><br />
+        <label for="high_band_value">High Band Value:</label>
+        <input type="text" id="high_band_value" name="high_band_value" pattern="\d*" required /><br /><br />
+        <label for="middle_value">Middle Value:</label>
+        <input type="text" id="middle_value" name="middle_value" pattern="\d*" required /><br /><br />
+        <label for="band_factor_value">Band Factor Value:</label>
+        <input type="text" id="band_factor_value" name="band_factor_value" pattern="\d*" required /><br /><br />
+        <button type="button" onclick="calculateThresholds()">Calculate</button><br /><br />
+        <label for="calculated_upper_threshold">Calculated Upper Threshold:</label>
+        <input type="number" id="calculated_upper_threshold" name="calculated_upper_threshold" readonly /><br /><br />
+        <label for="calculated_lower_threshold">Calculated Lower Threshold:</label>
+        <input type="number" id="calculated_lower_threshold" name="calculated_lower_threshold" readonly /><br /><br />
+      </form>
+    </div>
+    <div class="tool">
+      <h2>ABCG Balancing Calculator</h2>
+      <form id="abcg_form">
+        <label for="target_collector_mem">Target Collector Mem (in GB):</label>
+        <input type="text" id="target_collector_mem" name="target_collector_mem" pattern="\d*" required /><br /><br />
+        <label for="med_collector_mem">Medium Collector Mem (always 2GB):</label>
+        <input
+          type="text"
+          id="med_collector_mem"
+          name="med_collector_mem"
+          placeholder="2"
+          value="2"
+          readonly
+        /><br /><br />
+        <label for="instance_threshold">Instance Threshold:</label>
+        <input type="text" id="instance_threshold" name="instance_threshold" pattern="\d*" required /><br /><br />
+        <button type="button" onclick="calculateNumInstances()">Calculate</button><br /><br />
+        <label for="num_instances">Number of Instances:</label>
+        <input type="text" id="num_instances" name="num_instances" readonly /><br /><br />
+      </form>
+    </div>
+    <script>
+      function calculateThresholds() {
+        const high_band_value = Number(document.getElementById("high_band_value").value);
+        const middle_value = Number(document.getElementById("middle_value").value);
+        const low_band_value = Number(document.getElementById("low_band_value").value);
+        const band_factor_value = Number(document.getElementById("band_factor_value").value);
+
+        const calculated_upper_threshold = high_band_value + (high_band_value - middle_value) * band_factor_value;
+        const calculated_lower_threshold = low_band_value - (low_band_value - middle_value) * band_factor_value;
+
+        document.getElementById("calculated_upper_threshold").value = calculated_upper_threshold;
+        document.getElementById("calculated_lower_threshold").value = calculated_lower_threshold;
+      }
+      function calculateNumInstances() {
+        const target_collector_mem = Number(document.getElementById("target_collector_mem").value);
+        const med_collector_mem = Number(document.getElementById("med_collector_mem").value);
+        const instance_threshold = Number(document.getElementById("instance_threshold").value);
+
+        const num_instances = Math.sqrt(target_collector_mem / med_collector_mem) * instance_threshold;
+
+        document.getElementById("num_instances").value = num_instances;
+      }
+    </script>
+  </body>
+</html>
