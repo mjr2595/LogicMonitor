@@ -1,0 +1,2963 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<feed  version="1.0" hasPendingRequests="false" >
+  <company></company>
+  <status>200</status>
+  <errmsg>OK</errmsg>
+  <interval>0</interval>
+    <entry type="predatasource">
+        <version>1687445374</version>
+        <name>SNMP_Network_Interfaces_TCB</name>
+        <displayedas>Network Interfaces_TCB</displayedas>
+        <description>Collects network interface performance and operational stats.</description>
+        <collector>batchscript</collector>
+        <hasMultiInstances>true</hasMultiInstances>
+        <useWildValueAsUniqueIdentifier>true</useWildValueAsUniqueIdentifier>
+        <schedule>300</schedule>
+        <appliesTo>/*((hasCategory(&#34;snmp&#34;)&#38;&#38; !isWindows() &#38;&#38; !hasCategory(&#34;NoSnmpIf&#34;)) || hasCategory(&#34;OverrideNoSnmpIf&#34;))
+*/
+system.hostname == &#34;10.156.42.31&#34;</appliesTo>
+        <wildcardauto>true</wildcardauto>
+        <wildcardpersist>false</wildcardpersist>
+        <wildcardlinuxscript>ad_script</wildcardlinuxscript>
+        <wildcardlinuxcmdline>type=&#34;embeded&#34; </wildcardlinuxcmdline>
+        <wildcardwinscript>ad_script</wildcardwinscript>
+        <wildcardwincmdline>type=&#34;embeded&#34; </wildcardwincmdline>
+        <wildcardgroovyscript>/*******************************************************************************
+ * © 2007-2023 - LogicMonitor, Inc. All rights reserved.
+ *
+ * Default SNMP collection method is &#34;walk&#34; for all interfaces.
+ * To change the default SNMP collection method, set the host or group property
+ * &#34;interface.snmp.method&#34; to &#34;get&#34; or &#34;getconcurrent&#34;.
+ *
+ * The &#34;walk&#34; method retrieves all interfaces at once.
+ * The &#34;get&#34; method retrieves known active interfaces one at a time.
+ * The &#34;getconcurrent&#34; method retrieves known active interfaces in bulk.
+ *
+ * Some collection methods work better than others on certain deployments.
+ * Devices with known issues will be updated within the script
+ * for optimal collection preference.
+ ******************************************************************************/
+
+import com.santaba.agent.groovyapi.snmp.Snmp
+
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
+import com.santaba.agent.util.Settings
+import groovy.time.TimeCategory
+
+def scriptStartTime = new Date()
+
+def host = hostProps.get(&#34;system.hostname&#34;)
+Map props = hostProps.toProperties().collectEntries{ k,v-&#62; [(k.toLowerCase()):v]}
+def ifMode = props.getOrDefault(&#34;interface.mode&#34;, props.getOrDefault(&#34;auto.interface.mode&#34;, &#34;64&#34;)).toInteger()
+def timeoutStart = System.currentTimeMillis() // Used for timeout calculations
+def smallTimeout = 1500 // Timeout in MS used for small gets
+def timeout = Settings.getSettingInt(&#34;collector.batchscript.timeout&#34;, 
+                                     Settings.getSettingInt(&#34;collector.script.timeout&#34;, 
+                                                            120)) * 1000
+timeout -= 2500 // Allow a small buffer for the script to clean up after itself.
+
+def keyNamespace = hostProps.get(hostProps.get(&#34;topo.namespace&#34;, &#34;&#34;), &#34;&#34;)
+def keyBlacklist = hostProps.get(&#34;topo.blacklist&#34;, &#34;&#34;).tokenize(&#34;,&#34;)
+Boolean ifNameIsWV = props.get(&#34;interface.ifnameaswildvalue&#34;) ?: false
+// Time is in hours, default 2 weeks 
+Integer rmvUndiscoveredInterval = props.get(&#34;interface.removeUndiscoveredInterval&#34;) ?: 336 
+
+// Support added for Collector versions 29.105+ to retrieve instanceProps with datasourceinstanceProps.
+allInstanceProps = [:]
+
+datasourceinstanceProps.each{ instance, instanceProperties -&#62;
+    def instanceProp = [:]
+    for (key in instanceProperties.keySet()) {
+        instanceProp[key] = instanceProperties.get(key)
+    }
+    allInstanceProps.put(instanceProperties.get(&#34;wildvalue&#34;), instanceProp)
+}
+
+// List to hold instances discovered later in the script
+currentInstances = []
+
+// To run in debug mode, set to true
+debug = false
+
+// Set the known problematic sysoids here.
+Map deviceExtractionPreferences = [&#34;1.3.6.1.4.1.2636.1.1.1.2.43&#34; : &#34;getconcurrent&#34;, // Juniper ex2200-48t-4g
+                                   &#34;1.3.6.1.4.1.2636.1.1.1.1.131&#34;: &#34;getconcurrent&#34;, // Jupiter ex3400-48p
+                                   &#34;1.3.6.1.4.1.2636.1.1.1.2.63&#34; : &#34;getconcurrent&#34;, // Juniper ex4300-48p
+                                   &#34;1.3.6.1.4.1.9.12.3.1.3.1354&#34; : &#34;getconcurrent&#34;, // Cisco 7706 chassis
+                                   &#34;1.3.6.1.4.1.9.12.3.1.3.1409&#34; : &#34;getconcurrent&#34;, // Cisco 56128P chassis
+                                   &#34;1.3.6.1.4.1.9.12.3.1.3.1410&#34; : &#34;getconcurrent&#34;] // Cisco 5672P chassis
+
+// If there isn&#39;t an explicit snmp method defined, try and infer it from the known device preferences.
+String snmpMethod = props.get(&#34;interface.snmp.method&#34;)
+if (snmpMethod == null) {
+    String sysOid = props.get(&#34;system.sysoid&#34;)
+    snmpMethod = deviceExtractionPreferences.getOrDefault(sysOid, &#34;walk&#34;)
+    props[&#34;interface.snmp.method&#34;] = snmpMethod
+}
+
+// Allow custom filtering outside the script, accepts values &#34;true&#34; or &#34;false&#34; for host property &#34;interface.filtering&#34;
+def disableFiltering = [&#34;1&#34;, &#34;true&#34;, &#34;on&#34;].contains(hostProps.get(&#34;interface.filtering&#34;)?.toLowerCase())
+
+// Excluded device types
+List excludedIfTypes = [&#34;24&#34;,  // softwareLoopback
+                        &#34;71&#34;,  // ieee80211
+                        &#34;136&#34;, // l3ipvlan
+                        &#34;135&#34;] // l2vlan
+
+List excludedIfDescStartsWith = [&#34;veth&#34;,
+                                 &#34;lo&#34;,
+                                 &#34;nu&#34;,
+                                 &#34;vnet&#34;,
+                                 &#34;virbr&#34;]
+
+List excludedIfDescContains = [&#34;vif&#34;,
+                               &#34;stackport&#34;,
+                               &#34;internal-data&#34;,
+                               &#34;cplane&#34;]
+
+// Address and prefixes matching these prefixes will be absolutely filtered
+List reservedAddresses = [
+                            &#34;00:00:01:00:00:01&#34;,            // Problematic XEROX CORPORATION MACs
+                            &#34;00:00:01&#34;,                     // Cisco ASA virtual MACs
+                            &#34;01:00:01&#34;,
+                            &#34;00:01:00:00:00:01&#34;,
+                            &#34;00:08:e3&#34;,             // Cisco unicast
+                            &#34;00:21:00:00:00:22&#34;,
+                            &#34;00:13:00:00:00:14&#34;,
+                            &#34;00:0f:b7:48:48&#34;,
+                            &#34;00:16:00:00:00:16&#34;,
+                            &#34;00:00:15:00:00:00&#34;,
+                            &#34;00:15:00:00:00:15&#34;,
+                            &#34;00:14:00:00:00:14&#34;,
+                            &#34;00:14:00:00:00:15&#34;,
+                            &#34;00:01:00:00:00:01&#34;,
+                            &#34;00:21:00:00:00:21&#34;,
+                            &#34;00:21:00:00:00:22&#34;,
+                            &#34;7a:77:00:00:00:0&#34;,
+                            &#34;00:00:03:00:00:00&#34;,
+                            &#34;00:00:05:00:00:00&#34;,
+                            &#34;00:08:e3:ff:fc:28&#34;,            // Problematic Cisco MACs
+                            &#34;00:08:e3:ff:fd:90&#34;,
+                            &#34;02:00:4c:4f:4f:50&#34;, 
+                            &#34;02:50:f2:00:00:01&#34;, 
+                            &#34;00:25:b5:00:00:0f&#34;, 
+                            &#34;00:25:b5:00:00:1f&#34;, 
+                            &#34;00:18:18:16&#34;,
+                            &#34;12:00:00:00:00:00&#34;,
+                            &#34;54:10:ec&#34;,                     // Microchip
+                            &#34;00:90:fa&#34;,                     // Emulex
+                            &#34;cc:4e:24&#34;,                     // PCS
+                            &#34;00:90:8f&#34;,                     // Audio codes
+                            &#34;38:90:a5:be&#34;,                  // Threat Defense
+                            &#34;b4:0c:25:e&#34;,                   // Palo Alto Firewall HA
+                            &#34;00:1b:17:00&#34;,
+                            &#34;ba:db:ad&#34;,                     // Palo Alto VMware interface
+                            &#34;00:a0:c9:00:00:00&#34;,            // Firepower
+                            &#34;00:13:00:00:00:13&#34;,            // Problematic LLDP chassis ID
+                            &#34;00:00:00&#34;,                     // ARP
+                            &#34;01:00:00:00:00&#34;,
+                            &#34;01:00:5e&#34;,                     // Used for IPV4 Multicast and MLPS Multicast
+                            &#34;33:33&#34;,                        // Reserved for IPV6 Multicast
+                            &#34;02:00:4c:4f:4f:50&#34;,            // Microsoft Loopback adapter`
+                            &#34;20:41:53:59:4e:ff&#34;,            // RAS
+                            &#34;00:22:bd:f8:19:ff&#34;,            // Cisco ACI
+                            &#34;00:0b:ca:fe:00:00&#34;,            // Avaya/Xen
+                            &#34;02:00:00&#34;,                     // Common default
+                            &#34;02:00:01&#34;,
+                            &#34;00:00:03&#34;,                     // Problematic Cisco ASA mac
+                            &#34;00:07:b4:00&#34;,                  // GLBP
+                            &#34;00:09:0f:09&#34;,                  // Fortinet HA
+                            &#34;00:10:db:ff:10&#34;,               // Internal interfaces for Juniper
+                            &#34;02:42:ac:11&#34;,                  // Docker
+                            &#34;00:ff:c2:f3:cb:94&#34;,            // Windows
+                            &#34;1e:8e:39:50:50:05:05:69:00&#34;,   // VMware PVSCSI Controller
+                            &#34;c8:4f:86:fc:00&#34;,           // Sophos virutal HA MAC
+                            &#34;02:0f:00:0b:98&#34;,           //  Sophos virutal HA MAC
+                            &#34;0.0.0.0&#34;,                      // Bad CDP ID and IP
+                            &#34;127.0.0.1&#34;                     // Loopback
+]
+
+List ifTypes = [&#39;unknown&#39;, &#39;other&#39;, &#39;regular1822&#39;, &#39;hdh1822&#39;, &#39;ddnX25&#39;, &#39;rfc877x25&#39;, &#39;ethernetCsmacd&#39;, &#39;iso88023Csmacd&#39;, &#39;iso88024TokenBus&#39;,
+                &#39;iso88025TokenRing&#39;, &#39;iso88026Man&#39;, &#39;starLan&#39;, &#39;proteon10Mbit&#39;, &#39;proteon80Mbit&#39;, &#39;hyperchannel&#39;, &#39;fddi&#39;, &#39;lapb&#39;,
+                &#39;sdlc&#39;, &#39;ds1&#39;, &#39;e1&#39;, &#39;basicISDN&#39;, &#39;primaryISDN&#39;, &#39;propPointToPointSerial&#39;, &#39;ppp&#39;, &#39;softwareLoopback&#39;, &#39;eon&#39;, &#39;ethernet3Mbit&#39;,
+                &#39;nsip&#39;, &#39;slip&#39;, &#39;ultra&#39;, &#39;ds3&#39;, &#39;sip&#39;, &#39;frameRelay&#39;, &#39;rs232&#39;, &#39;para&#39;, &#39;arcnet&#39;, &#39;arcnetPlus&#39;, &#39;atm&#39;, &#39;miox25&#39;, &#39;sonet&#39;, &#39;x25ple&#39;,
+                &#39;iso88022llc&#39;, &#39;localTalk&#39;, &#39;smdsDxi&#39;, &#39;frameRelayService&#39;, &#39;v35&#39;, &#39;hssi&#39;, &#39;hippi&#39;, &#39;modem&#39;, &#39;aal5&#39;, &#39;sonetPath&#39;, &#39;sonetVT&#39;,
+                &#39;smdsIcip&#39;, &#39;propVirtual&#39;, &#39;propMultiplexor&#39;, &#39;ieee80212&#39;, &#39;fibreChannel&#39;, &#39;hippiInterface&#39;, &#39;frameRelayInterconnect&#39;,
+                &#39;aflane8023&#39;, &#39;aflane8025&#39;, &#39;cctEmul&#39;, &#39;fastEther&#39;, &#39;isdn&#39;, &#39;v11&#39;, &#39;v36&#39;, &#39;g703at64k&#39;, &#39;g703at2mb&#39;, &#39;qllc&#39;, &#39;fastEtherFX&#39;,
+                &#39;channel&#39;, &#39;ieee80211&#39;, &#39;ibm370parChan&#39;, &#39;escon&#39;, &#39;dlsw&#39;, &#39;isdns&#39;, &#39;isdnu&#39;, &#39;lapd&#39;, &#39;ipSwitch&#39;, &#39;rsrb&#39;, &#39;atmLogical&#39;, &#39;ds0&#39;,
+                &#39;ds0Bundle&#39;, &#39;bsc&#39;, &#39;async&#39;, &#39;cnr&#39;, &#39;iso88025Dtr&#39;, &#39;eplrs&#39;, &#39;arap&#39;, &#39;propCnls&#39;, &#39;hostPad&#39;, &#39;termPad&#39;, &#39;frameRelayMPI&#39;, &#39;x213&#39;,
+                &#39;adsl&#39;, &#39;radsl&#39;, &#39;sdsl&#39;, &#39;vdsl&#39;, &#39;iso88025CRFPInt&#39;, &#39;myrinet&#39;, &#39;voiceEM&#39;, &#39;voiceFXO&#39;, &#39;voiceFXS&#39;, &#39;voiceEncap&#39;, &#39;voiceOverIp&#39;,
+                &#39;atmDxi&#39;, &#39;atmFuni&#39;, &#39;atmIma&#39;, &#39;pppMultilinkBundle&#39;, &#39;ipOverCdlc&#39;, &#39;ipOverClaw&#39;, &#39;stackToStack&#39;, &#39;virtualIpAddress&#39;, &#39;mpc&#39;,
+                &#39;ipOverAtm&#39;, &#39;iso88025Fiber&#39;, &#39;tdlc&#39;, &#39;gigabitEthernet&#39;, &#39;hdlc&#39;, &#39;lapf&#39;, &#39;v37&#39;, &#39;x25mlp&#39;, &#39;x25huntGroup&#39;, &#39;trasnpHdlc&#39;, &#39;interleave&#39;,
+                &#39;fast&#39;, &#39;ip&#39;, &#39;docsCableMaclayer&#39;, &#39;docsCableDownstream&#39;, &#39;docsCableUpstream&#39;, &#39;a12MppSwitch&#39;, &#39;tunnel&#39;, &#39;coffee&#39;, &#39;ces&#39;,
+                &#39;atmSubInterface&#39;, &#39;l2vlan&#39;, &#39;l3ipvlan&#39;, &#39;l3ipxvlan&#39;, &#39;digitalPowerline&#39;, &#39;mediaMailOverIp&#39;, &#39;dtm&#39;, &#39;dcn&#39;, &#39;ipForward&#39;, &#39;msdsl&#39;,
+                &#39;ieee1394&#39;, &#39;if-gsn&#39;, &#39;dvbRccMacLayer&#39;, &#39;dvbRccDownstream&#39;, &#39;dvbRccUpstream&#39;, &#39;atmVirtual&#39;, &#39;mplsTunnel&#39;, &#39;srp&#39;, &#39;voiceOverAtm&#39;,
+                &#39;voiceOverFrameRelay&#39;, &#39;idsl&#39;, &#39;compositeLink&#39;, &#39;ss7SigLink&#39;, &#39;propWirelessP2P&#39;, &#39;frForward&#39;, &#39;rfc1483&#39;, &#39;usb&#39;, &#39;ieee8023adLag&#39;,
+                &#39;bgppolicyaccounting&#39;, &#39;frf16MfrBundle&#39;, &#39;h323Gatekeeper&#39;, &#39;h323Proxy&#39;, &#39;mpls&#39;, &#39;mfSigLink&#39;, &#39;hdsl2&#39;, &#39;shdsl&#39;, &#39;ds1FDL&#39;, &#39;pos&#39;,
+                &#39;dvbAsiIn&#39;, &#39;dvbAsiOut&#39;, &#39;plc&#39;, &#39;nfas&#39;, &#39;tr008&#39;, &#39;gr303RDT&#39;, &#39;gr303IDT&#39;, &#39;isup&#39;, &#39;propDocsWirelessMaclayer&#39;,
+                &#39;propDocsWirelessDownstream&#39;, &#39;propDocsWirelessUpstream&#39;, &#39;hiperlan2&#39;, &#39;propBWAp2Mp&#39;, &#39;sonetOverheadChannel&#39;,
+                &#39;digitalWrapperOverheadChannel&#39;, &#39;aal2&#39;, &#39;radioMAC&#39;, &#39;atmRadio&#39;, &#39;imt&#39;, &#39;mvl&#39;, &#39;reachDSL&#39;, &#39;frDlciEndPt&#39;, &#39;atmVciEndPt&#39;,
+                &#39;opticalChannel&#39;, &#39;opticalTransport&#39;, &#39;propAtm&#39;, &#39;voiceOverCable&#39;, &#39;infiniband&#39;, &#39;teLink&#39;, &#39;q2931&#39;, &#39;virtualTg&#39;, &#39;sipTg&#39;,
+                &#39;sipSig&#39;, &#39;docsCableUpstreamChannel&#39;, &#39;econet&#39;, &#39;pon155&#39;, &#39;pon622&#39;, &#39;bridge&#39;, &#39;linegroup&#39;, &#39;voiceEMFGD&#39;, &#39;voiceFGDEANA&#39;,
+                &#39;voiceDID&#39;, &#39;mpegTransport&#39;, &#39;sixToFour&#39;, &#39;gtp&#39;, &#39;pdnEtherLoop1&#39;, &#39;pdnEtherLoop2&#39;, &#39;opticalChannelGroup&#39;, &#39;homepna&#39;, &#39;gfp&#39;,
+                &#39;ciscoISLvlan&#39;, &#39;actelisMetaLOOP&#39;, &#39;fcipLink&#39;, &#39;rpr&#39;, &#39;qam&#39;, &#39;lmp&#39;, &#39;cblVectaStar&#39;, &#39;docsCableMCmtsDownstream&#39;, &#39;adsl2&#39;,
+                &#39;macSecControlledIF&#39;, &#39;macSecUncontrolledIF&#39;, &#39;aviciOpticalEther&#39;, &#39;atmbond&#39;, &#39;voiceFGDOS&#39;, &#39;mocaVersion1&#39;, &#39;ieee80216WMAN&#39;,
+                &#39;adsl2plus&#39;, &#39;dvbRcsMacLayer&#39;, &#39;dvbTdm&#39;, &#39;dvbRcsTdma&#39;]
+
+// Lookup for ifOperStatus value.
+OPERATIONAL_STATES = [
+        &#34;1&#34;: &#34;up&#34;,
+        &#34;2&#34;: &#34;down&#34;,
+        &#34;3&#34;: &#34;testing&#34;,
+        &#34;4&#34;: &#34;unknown&#34;,
+        &#34;5&#34;: &#34;dormant&#34;,
+        &#34;6&#34;: &#34;notPresent&#34;,
+        &#34;7&#34;: &#34;lowerLayerDown&#34;
+]
+
+ADMIN_STATES = [
+        &#34;1&#34;: &#34;up&#34;,
+        &#34;2&#34;: &#34;down&#34;,
+        &#34;3&#34;: &#34;testing&#34;
+]
+
+// Extract and filter interface table
+LMDebugPrint( &#34;\nStarting to extract interfaces and their associated data:&#34;)
+
+def ifTable = extractInterfaces(host, props, ifMode, timeout, timeoutStart)
+
+LMDebugPrint( &#34;\nifTable Contents:\n\t${ifTable}\n\n&#34;)
+
+// Filter out invalid MACs or excluded interface types from collected interfaces
+ifTable.each { ifIndex, iface -&#62;
+    iface.mac = iface?.mac?.toLowerCase()
+    iface.valid = true
+
+    if (disableFiltering) return
+
+    if (excludedIfTypes.contains(iface.type) ||
+        excludedIfDescStartsWith.any { iface.description?.toLowerCase()?.startsWith(it) } ||
+        excludedIfDescContains.any { iface.description?.toLowerCase() =~ it }
+    ) {
+        iface.valid = false
+        return
+    }
+}
+
+// Revoke invalidation on interfaces that share a mac address with a valid port
+ifTable.values().findAll { it.valid == false }.each { ifEntry -&#62;
+    def siblings = ifTable.values().findAll { (it.mac == ifEntry.mac) &#38;&#38; it.valid }
+    if (siblings) {
+        ifEntry.valid = true
+    }
+}
+
+def cdpEri
+def cdpInterfaces
+try {
+    LMDebugPrint( &#34;Extracting cdpGlobalDeviceId ERI and CDP interfaces...&#34; )
+    cdpEri = Snmp.get(host, &#34;1.3.6.1.4.1.9.9.23.1.3.4.0&#34;)
+    if (cdpEri) LMDebugPrint( &#34;\tcdpGlobalDeviceId ERI: ${cdpEri}&#34; )
+
+    cdpInterfaces = Snmp.walkAsMap(host, &#34;1.3.6.1.4.1.9.9.23.1.1.1.1.6&#34;, null, timeout)
+    if (cdpInterfaces) LMDebugPrint( &#34;\tCDP interfaces: ${cdpInterfaces}&#34; )
+
+} catch (Exception e) { LMDebugPrint( &#34;\tException while fetching CDP interfaces: ${e}&#34; ) }
+
+LMDebugPrint( &#34;&#34; )
+
+def lldpEri
+def lldpInterfaces
+try {
+    LMDebugPrint( &#34;Extracting lldpLocChassisId ERI and LLDP interfaces...&#34; )
+
+    lldpEri = Snmp.get(host, &#34;1.0.8802.1.1.2.1.3.2.0&#34;)
+    if (lldpEri) LMDebugPrint( &#34;\tlldpLocChassisId ERI: ${lldpEri}&#34; )
+
+    lldpInterfaces = Snmp.walkAsMap(host, &#34;1.0.8802.1.1.2.1.3.7.1.3&#34;, null, timeout)
+    if (lldpInterfaces) LMDebugPrint( &#34;\tLLDP interfaces: ${lldpInterfaces}&#34; )
+
+} catch (Exception e) { LMDebugPrint( &#34;\tException while fetching LLDP interfaces: ${e}&#34; ) }
+
+LMDebugPrint( &#34;&#34; )
+
+// Set MAC, CDP, and LLDP ERI and Interface ERT
+def globalIfEri = []
+ifTable.each { ifIndex, iface -&#62;
+    def ifEri = []
+    if (iface.mac &#38;&#38; isMac(iface.mac, reservedAddresses)) {
+        ifEri &#60;&#60; &#34;interface:${iface.mac}&#34;
+    }
+
+    if (cdpEri &#38;&#38; !reservedAddresses.find { cdpEri.startsWith(it) }) {
+        def cdpInterfaceEntry = cdpInterfaces?.find { ifIdx, cdpInterfaceEntry -&#62; ifIdx == ifIndex   || iface?.name?.toLowerCase() == cdpInterfaceEntry?.toLowerCase()}?.value
+        if (cdpInterfaceEntry ){
+            ifEri &#60;&#60; &#34;cdp-interface:${cdpEri}--${cdpInterfaceEntry}&#34;
+        }
+    }
+
+    if (lldpEri &#38;&#38; !reservedAddresses.find { lldpEri.startsWith(it) }) {
+        def lldpInterfaceEntry = lldpInterfaces?.find { ifIdx, lldpInterfaceEntry -&#62; ifIdx == ifIndex  || iface?.name?.toLowerCase() == lldpInterfaceEntry?.toLowerCase() }?.value
+        if (lldpInterfaceEntry) { 
+            ifEri &#60;&#60; &#34;lldp-interface:${lldpEri}--${lldpInterfaceEntry}&#34;
+        }
+    }
+
+    if (!ifEri.isEmpty() &#38;&#38; !ifEri.find { globalIfEri.contains(it) }) {
+        iface[&#39;predef.externalResourceID&#39;] = eriPreProcessor(ifEri, keyNamespace, keyBlacklist)
+        iface[&#39;predef.externalResourceType&#39;] = &#34;Interface&#34;   
+        ifEri.each { globalIfEri &#60;&#60; it }           
+    }  
+}
+
+ifTable.each { ifIndex, ifEntry -&#62;
+    // We can stop now if it is not valid
+    if (!ifEntry.valid) {
+        return
+    }
+
+    if (ifMode == 64) {
+        // Only create auto.interface.speed if we got a value.
+        String interfaceSpeed = ifEntry.get(&#34;highspeed&#34;)
+        if (interfaceSpeed != null) {
+            ifEntry.speed = interfaceSpeed.toBigInteger() * 1000000
+        }
+    }
+
+    // Clean up for instance level properties
+    ifEntry.remove(&#39;highspeed&#39;)
+    ifEntry.remove(&#39;valid&#39;)
+    ifEntry.remove(&#39;ifAdminStatus&#39;)
+    ifEntry.remove(&#39;ifOperStatus&#39;)
+    ifEntry.remove(&#39;ifInOctets&#39;)
+    ifEntry.remove(&#39;ifOutOctets&#39;)
+
+    // Catch a null alias.
+    if (ifEntry.alias == null) ifEntry.alias = &#34;&#34;
+
+    // Catch a null type
+    def ifTypeNum = ifEntry?.type?.toBigInteger()
+    if (ifTypeNum != null) ifEntry.type = ifTypes[ifTypeNum]
+
+    ifEntry.alias       = ifEntry?.alias?.toString()?.replaceAll(/#*/, &#34;&#34;)
+    ifEntry.description = ifEntry?.description?.toString()?.replaceAll(/#*/, &#34;&#34;)
+
+    def description = ifEntry.alias ? &#34;${ifEntry.alias}&#34; : &#34;${ifEntry.name} - ${ifEntry.mac}&#34;
+    description = description.replace(/null - /, &#34;&#34;) // If no ifEntry.name is returned, only return MAC Address.
+    if (ifEntry.alias == null &#38;&#38; ifEntry.mac == null) description = ifEntry.name
+
+    // Now that we&#39;re done adjusting alias and description, assign them to variables accordingly for proper output
+    def alias = &#34;${ifEntry.description} [ID:${ifIndex}]&#34;
+    ifEntry.description = description?.replaceAll(/\+/, &#34;%2B&#34;)?.replaceAll(&#34;=&#34;, &#34;%3D&#34;)?.replaceAll(&#34;&#38;&#34;, &#34;%26&#34;)
+    ifEntry.alias = ifEntry.alias?.replaceAll(/\+/, &#34;%2B&#34;)?.replaceAll(&#34;=&#34;, &#34;%3D&#34;)?.replaceAll(&#34;&#38;&#34;, &#34;%26&#34;)
+    ifEntry.wildalias = alias
+    ifEntry.lastDiscovered = scriptStartTime
+    if(ifNameIsWV){
+        println &#34;${ifEntry.name}##${alias}##${description}####${ifEntry.collect { it.key.contains(&#34;predef&#34;) ? &#34;${it}&#34; : &#34;auto.interface.${it}&#34; }.join(&#34;&#38;&#34;)}&#34;
+        currentInstances.push(ifEntry.name)
+    }
+    else{
+        println &#34;${ifIndex}##${alias}##${description}####${ifEntry.collect { it.key.contains(&#34;predef&#34;) ? &#34;${it}&#34; : &#34;auto.interface.${it}&#34; }.join(&#34;&#38;&#34;)}&#34;
+        currentInstances.push(ifIndex)
+    }
+}
+
+// Logic to handle interfaces that are no longer discovered but are retained for alerting purposes for a period of time
+allInstanceProps.each { key, value -&#62;
+    if (!currentInstances.contains(key)) {
+        if (value.&#39;auto.interface.lastdiscovered&#39;) {
+            use(TimeCategory) {
+                // Calculate the time between the two dates
+                def timeDiff = scriptStartTime - Date.parse(&#34;EEE MMM dd HH:mm:ss z yyyy&#34;, value.&#39;auto.interface.lastdiscovered&#39;)
+                // Calculate the number of hours in the duration
+                hours = timeDiff.hours
+            }
+            // Check if number of hours since last discovery is less than allowed interval and if so reuse the instance with previous values
+            if(hours &#60; rmvUndiscoveredInterval){
+                def propsList = []
+                // Instance props include custom and system values that are not relevant we only want to re-use auto. and predef. properties
+                value.each { propKey, propValue -&#62;
+                    if (propKey.startsWith(&#34;auto.&#34;) || propKey.startsWith(&#34;predef&#34;)) {
+                        propsList.push(&#34;$propKey=$propValue&#34;)
+                    }
+                }
+                println &#34;${key}##${value.&#39;wildalias&#39;}##${value.&#39;system.instanceDescription&#39;}####${propsList.join(&#39;&#38;&#39;)}&#34;
+            }
+        }
+    }
+}
+
+LMDebugPrint(&#34;Script run time: ${TimeCategory.minus( new Date(), scriptStartTime )}&#34;) 
+
+return 0
+
+/**
+ * Function to validate a MAC address and filter it out if reserved or blacklisted
+ */
+def isMac(address, reservedAddresses) {
+    if (address == null) return false
+
+    if (address.matches(&#34;[0-9a-f]{2}([-:]?)[0-9a-f]{2}(\\1[0-9a-f]{2}){4}\$&#34;)) {
+        if (!reservedAddresses.find { address.startsWith(it) }) {
+            return true
+        }
+    }
+    return false
+}
+
+/**
+ * Function to pre process a list of ERI given a namespace and blacklist
+ */
+def eriPreProcessor(List eriList, String namespace, List blacklist) {
+    def output = []
+    eriList.each{ eri-&#62;
+        eri = eri.toLowerCase()
+        eri = eri.replace(&#34;,&#34;, &#34;_&#34;)
+        if(!blacklist.contains(eri)) {
+            if(namespace) eri=&#34;${namespace.replace(&#34;,&#34;, &#34;_&#34;)}::${eri}&#34;
+            output &#60;&#60; eri
+        }
+    }
+    return output.join(&#34;,&#34;)
+}
+
+/**
+ * Function to extract interfaces
+ */
+def extractInterfaces(host, props, ifMode, timeout, timeoutStart) {
+    Map counters = [ifAdminStatus: &#34;1.3.6.1.2.1.2.2.1.7&#34;,
+                    name: &#34;1.3.6.1.2.1.31.1.1.1.1&#34;,
+                    description: &#34;1.3.6.1.2.1.2.2.1.2&#34;,
+                    mac: &#34;1.3.6.1.2.1.2.2.1.6&#34;,
+                    type: &#34;1.3.6.1.2.1.2.2.1.3&#34;,
+                    mtu: &#34;1.3.6.1.2.1.2.2.1.4&#34;,
+                    alias: &#34;1.3.6.1.2.1.31.1.1.1.18&#34;]
+
+    def blockedMetrics = props.get(&#34;interface.blockedMetrics&#34;, &#34;&#34;).tokenize(&#34;,&#34;)
+    blockedMetrics.each { metric -&#62;
+        counters.remove(metric.trim())
+    }
+
+    // If 64-bit interface, use the ifHCInOctets and ifHCOutOctets OID, otherwise use ifInOctets and ifOutOctets OID.
+    if (ifMode == 64){
+        LMDebugPrint(&#34;Using 64-bit interface mode&#34;)
+        counters[&#34;ifInOctets&#34;] =  &#34;1.3.6.1.2.1.31.1.1.1.6&#34;
+        counters[&#34;ifOutOctets&#34;] = &#34;1.3.6.1.2.1.31.1.1.1.10&#34;
+        counters[&#34;highspeed&#34;] =   &#34;1.3.6.1.2.1.31.1.1.1.15&#34;
+    }
+    else {
+        LMDebugPrint(&#34;Using 32-bit interface mode&#34;)
+        counters[&#34;speed&#34;] = &#34;1.3.6.1.2.1.2.2.1.5&#34;
+        counters[&#34;ifInOctets&#34;] =  &#34;1.3.6.1.2.1.2.2.1.10&#34;
+        counters[&#34;ifOutOctets&#34;] = &#34;1.3.6.1.2.1.2.2.1.16&#34;
+    }
+
+    // Lets do an initial walk with something we know will be a small return payload.
+    Map initialValues = walkSnmp([ifOperStatus: &#34;1.3.6.1.2.1.2.2.1.8&#34;], props, timeout, timeoutStart)
+
+    // Bail out of script early if the previous walk was not successful
+    // Most of our data comes from this SNMP table - if that walk fails,
+    // we aren&#39;t likely to succeed elsewhere and should not waste collector resources trying
+    if(!initialValues.ifOperStatus) {
+        throw new Exception(&#34;Unable to get initial interface information&#34;)
+    }
+    
+    List knownInterfaces =  []
+    knownInterfaces.addAll(initialValues.ifOperStatus.keySet())
+
+    Map ifTable = [:]
+    knownInterfaces.each { ifIndex-&#62;
+        ifTable[ifIndex] = [&#39;ifIndex&#39;: ifIndex]
+    }
+
+    initialValues.each {fieldName, data-&#62;
+        data.each { ifIndex, value-&#62;
+            def entry = ifTable.get(ifIndex)
+            entry[fieldName] = value
+        }
+    }
+
+    // Then we fetch all the data using the selected method
+    getData(counters, knownInterfaces, props, timeout, timeoutStart).each {fieldName, data-&#62;
+        data.each { ifIndex, value-&#62;
+            def entry = ifTable.get(ifIndex)
+            if (entry){
+                entry[fieldName] = value
+            }
+        }
+    }
+
+    // Do some post processing on the ifTable
+    ifTable.each { ifIndex, entry-&#62;
+        String mac = entry.mac
+        if(mac == null) mac = &#34;&#34;
+
+        // detect binary MACs and convert them to hex format
+        if (mac.length() == 6) {
+            byte[] macByte = mac
+            def rawMacString = macByte?.encodeHex()?.toString()
+            if (rawMacString &#38;&#38; rawMacString.size() == 12) {
+                def formattedMac = rawMacString.split(&#34;(?&#60;=\\G..)&#34;).join(&#34;:&#34;)
+                if (formattedMac) {
+                    mac = formattedMac
+                }
+            }
+        }
+        entry.mac = mac
+    }
+
+    ifTable.each { ifIndex, entry-&#62;
+        //True of False for Incoming our Outgoing Traffic.
+        def hasInTraffic = ![null, &#34;0&#34;].contains(entry.ifInOctets)
+        def hasOutTraffic = ![null, &#34;0&#34;].contains(entry.ifOutOctets)
+
+        //Set has_traffic = true if the interface had traffic on at least the incoming or outgoing side of the interface.
+        if (hasInTraffic || hasOutTraffic){
+            entry.has_traffic = true
+        }
+        else{
+            entry.has_traffic = false
+        }
+
+        // Get operational state and lookup
+        entry[&#39;operational.state&#39;] = OPERATIONAL_STATES.getOrDefault(entry.ifOperStatus, entry.ifOperStatus)
+        entry.remove(&#34;ifOperStatus&#34;)
+        // Parse admin state
+        entry[&#34;admin.state&#34;] = ADMIN_STATES.getOrDefault(entry.ifAdminStatus, entry.ifAdminStatus)
+        entry.remove(&#34;ifAdminStatus&#34;)
+
+        if (entry.name == null){
+            entry.name = &#34;&#34;
+        }
+
+    }
+
+    return ifTable
+}
+
+/**
+ * Helper function to print out debug messages for troubleshooting purposes.
+ */
+def LMDebugPrint(message) {
+    if (debug) {
+        println(message.toString())
+    }
+}
+
+
+
+Map getData(Map mapCounters, List knownInterfaces, Map props, Integer timeout, Long start) {
+    String snmpMethod = props.get(&#34;interface.snmp.method&#34;)
+    LMDebugPrint(&#34;SNMP method: ${snmpMethod}&#34;)
+    switch (snmpMethod) {
+        case &#34;walk&#34;:
+            return walkSnmp(mapCounters, props, timeout, start)
+            break
+        case &#34;get&#34;:
+            return getSnmp(mapCounters, knownInterfaces, props, timeout, start)
+            break
+        case &#34;getconcurrent&#34;:
+            return concurrentGetSnmp(mapCounters, knownInterfaces, props, timeout, start)
+            break
+        default:
+            LMDebugPrint(&#34;Invalid collection method&#34;)
+    }
+}
+
+def walkSnmp(Map requestedOids, Map props, Integer timeout, Long start) {
+    String hostname = props.get(&#34;system.hostname&#34;)
+
+    def retries = 0
+    def output = [:]
+    while (retries &#60; 5) {
+        if (requestedOids.size() == output.size()) { break }
+        retries++
+
+        requestedOids.each { fieldName, requestedOid -&#62;
+            def remainingTime = Math.max(0, timeout - (System.currentTimeMillis() - start)).intValue()
+            if (remainingTime == 0) throw new Exception(&#34;Timeout waiting on SNMP Walks&#34;)
+
+            if (output.containsKey(fieldName)) return // Avoid pulling something we already got.
+
+            try {
+                def response = Snmp.walkAsMap(hostname, requestedOid, props, remainingTime)
+
+                 if (response != null) {
+                    output[fieldName] = response
+                }
+            } catch (IOException ignored) {
+                // Silently ignore timeouts and wait for a bit.
+                LMDebugPrint(&#34;SNMP WALK to ${hostname} timed out&#34;)
+                Thread.sleep(25)
+            }
+        }
+    }
+
+    if(output) {
+        LMDebugPrint(&#34;Returning ${output.size()}/${requestedOids.size()} to host ${hostname} after ${retries} retries&#34;)
+        return  output
+    } else {
+        throw new Exception(&#34;No results returned for SNMP Walks&#34;)
+    }
+}
+
+def getSnmp(Map counters, List knownInterfaces, Map props, Integer timeout) {
+    Map dataMap = [:]
+    String hostname = props.get(&#34;system.hostname&#34;)
+
+    LMDebugPrint(&#34;knownInterfaces has ${knownInterfaces.size()} items in it&#34;)
+
+    counters.each { fieldName, oid -&#62;
+        knownInterfaces.each { port -&#62;
+            String oidToGet = oid + &#34;.&#34; + port
+            def portStats = retrySnmpGet(hostname, oidToGet, props, timeout)
+
+            if (!dataMap[fieldName]) {
+                dataMap[fieldName] = [:]
+            }
+            dataMap[fieldName][port] = portStats
+        }
+    }
+    return dataMap
+}
+
+def concurrentGetSnmp(Map counters, List knownInterfaces, Map props, Integer timeout, Long start) {
+    Map dataMap = [:]
+    String hostname = props.get(&#34;system.hostname&#34;)
+
+    def threadpool_size = Math.max(Math.min((hostProps.get(&#34;interface.poolsize&#34;) ?: &#34;20&#34;).toInteger(), 30), 1)
+    LMDebugPrint(&#34;Concurrent SNMP GET using ${threadpool_size} threads&#34;)
+    def thread_pool = Executors.newFixedThreadPool(threadpool_size)
+
+    def script_timeout = Settings.getSetting(&#34;collector.batchscript.timeout&#34;).toInteger() * 1000
+    def timer_start = System.currentTimeMillis()
+    try {
+        def lock = new ReentrantLock()
+
+        counters.each { metric, oid -&#62;
+            knownInterfaces.each { port -&#62;
+                thread_pool.submit {
+                    String oidToGet = oid + &#34;.&#34; + port
+                    def portStats = retrySnmpGet(hostname, oidToGet, props, timeout, start)
+                    lock.lock()
+                    try {
+                        if (!dataMap[metric]) {
+                            dataMap[metric] = [:]
+                        }
+                        dataMap[metric][port] = portStats
+                    }
+                    finally {
+                        lock.unlock()
+                    }
+                }
+            }
+        }
+    }
+    finally {
+        // Initiate an orderly shutdown of the thread pool
+        thread_pool.shutdown()
+
+        // Calculate the remaining execution time
+        def remaining_time = ((script_timeout - System.currentTimeMillis() + timer_start) - 2000)
+
+        // Block until the script times out or all tasks have finished executing
+        thread_pool.awaitTermination(remaining_time, TimeUnit.MILLISECONDS)
+
+        // Force all remaining tasks in the pool to abort.
+        thread_pool.shutdownNow()
+    }
+
+    return dataMap
+}
+
+def retrySnmpGet(String hostname, String requestedOid, Map props, Integer timeout, Long start) {
+    def retries = 0
+    while (retries &#60; 5) {
+        retries++
+
+        def remainingTime = Math.max(0, timeout - (System.currentTimeMillis() - start)).intValue()
+        if (remainingTime == 0) break
+
+        remainingTime  = Math.min(remainingTime, 1500)
+
+        try {
+            return Snmp.get(hostname, requestedOid, props, remainingTime)
+        } catch (IOException ignored) {
+            // Silently ignore timeouts and wait for a bit.
+            LMDebugPrint(&#34;SNMP GET to ${requestedOid} timed out, waiting&#34;)
+            Thread.sleep(25)
+        }
+    }
+
+    LMDebugPrint(&#34;SNMP GET ${requestedOid} to ${hostname} failed after ${retries} retries &#34;)
+}</wildcardgroovyscript>
+        <wildcardschedule>15</wildcardschedule>
+        <wildcarddisable>false</wildcarddisable>
+        <wildcarddeleteinactive>true</wildcarddeleteinactive>
+        <agdmethod>none</agdmethod>
+        <agdparams></agdparams>
+        <group></group>
+        <tags>networking,snmp,interface,network</tags>
+        <technology>Support documentation available here - https://www.logicmonitor.com/support/monitoring/networking-firewalls/interface-status-alerting
+- To override the speed on an interface, set &#34;in_speed&#34; and &#34;out_speed&#34;, or &#34;ActualSpeed&#34; and &#34;ActualSpeedUpstream&#34; for the interface ILPs.
+- To switch between 32-bit or 64-bit architecture modes, set the host property &#34;interface.mode&#34; to 32 or 64.
+- To disable interface filtering, set the host property &#34;interface.filtering&#34; to true. 
+- To alert on certain interfaces, set a host property with a regex matching the interfaces you want to alert on for status and flap datapoints.  This can be done with the following host properties:
+	 - &#34;interface.description.alert_enable&#34; (matches system.instanceDescription)
+	 - &#34;interface.alias.alert_enable&#34; (matches auto.interface.alias)
+	 - &#34;interface.wildalias.alert_enable&#34; (matches auto.interface.wildalias)
+Note: auto.interface.alias will most closely match the alias assigned at a system level which is sometimes left blank.  auto.interface.wildalias will match the instance display name in LogicMonitor.
+
+- To block specific metrics from being extracted in Active Discovery and Collection, set a CSV list of them to &#34;interface.blockedMetrics&#34;.
+- To adjust the number of threads used to extract data via concurrent GET requests, set &#34;interface.poolsize&#34; (default is 20).</technology>
+        <adlist><![CDATA[{"agdmethod":"none","method":"ad_script","agdparams":"","id":0,"filters":[{"attribute":"auto.interface.name","operation":"RegexNotMatch","value":"Internal-Data|cplane"},{"attribute":"auto.interface.name","operation":"NotContain","value":"vif"},{"attribute":"auto.interface.type","operation":"NotEqual","value":"ieee80211"},{"attribute":"auto.interface.type","operation":"NotEqual","value":"softwareLoopback"},{"attribute":"auto.interface.name","operation":"RegexNotMatch","value":"^Lo|wifi|^Nu"},{"attribute":"auto.interface.type","operation":"RegexNotMatch","value":"(l2vlan)|(l3ipvlan)"},{"attribute":"auto.interface.operational.state","operation":"Equal","value":"up"},{"attribute":"auto.interface.has_traffic","operation":"Equal","value":"true"}],"params":{"type":"embeded","groovyscript":"/*******************************************************************************\n * © 2007-2023 - LogicMonitor, Inc. All rights reserved.\n *\n * Default SNMP collection method is \"walk\" for all interfaces.\n * To change the default SNMP collection method, set the host or group property\n * \"interface.snmp.method\" to \"get\" or \"getconcurrent\".\n *\n * The \"walk\" method retrieves all interfaces at once.\n * The \"get\" method retrieves known active interfaces one at a time.\n * The \"getconcurrent\" method retrieves known active interfaces in bulk.\n *\n * Some collection methods work better than others on certain deployments.\n * Devices with known issues will be updated within the script\n * for optimal collection preference.\n ******************************************************************************/\n\nimport com.santaba.agent.groovyapi.snmp.Snmp\n\nimport java.util.concurrent.Executors\nimport java.util.concurrent.TimeUnit\nimport java.util.concurrent.locks.ReentrantLock\nimport com.santaba.agent.util.Settings\nimport groovy.time.TimeCategory\n\ndef scriptStartTime = new Date()\n\ndef host = hostProps.get(\"system.hostname\")\nMap props = hostProps.toProperties().collectEntries{ k,v-> [(k.toLowerCase()):v]}\ndef ifMode = props.getOrDefault(\"interface.mode\", props.getOrDefault(\"auto.interface.mode\", \"64\")).toInteger()\ndef timeoutStart = System.currentTimeMillis() // Used for timeout calculations\ndef smallTimeout = 1500 // Timeout in MS used for small gets\ndef timeout = Settings.getSettingInt(\"collector.batchscript.timeout\", \n                                     Settings.getSettingInt(\"collector.script.timeout\", \n                                                            120)) * 1000\ntimeout -= 2500 // Allow a small buffer for the script to clean up after itself.\n\ndef keyNamespace = hostProps.get(hostProps.get(\"topo.namespace\", \"\"), \"\")\ndef keyBlacklist = hostProps.get(\"topo.blacklist\", \"\").tokenize(\",\")\nBoolean ifNameIsWV = props.get(\"interface.ifnameaswildvalue\") ?: false\n// Time is in hours, default 2 weeks \nInteger rmvUndiscoveredInterval = props.get(\"interface.removeUndiscoveredInterval\") ?: 336 \n\n// Support added for Collector versions 29.105+ to retrieve instanceProps with datasourceinstanceProps.\nallInstanceProps = [:]\n\ndatasourceinstanceProps.each{ instance, instanceProperties ->\n    def instanceProp = [:]\n    for (key in instanceProperties.keySet()) {\n        instanceProp[key] = instanceProperties.get(key)\n    }\n    allInstanceProps.put(instanceProperties.get(\"wildvalue\"), instanceProp)\n}\n\n// List to hold instances discovered later in the script\ncurrentInstances = []\n\n// To run in debug mode, set to true\ndebug = false\n\n// Set the known problematic sysoids here.\nMap deviceExtractionPreferences = [\"1.3.6.1.4.1.2636.1.1.1.2.43\" : \"getconcurrent\", // Juniper ex2200-48t-4g\n                                   \"1.3.6.1.4.1.2636.1.1.1.1.131\": \"getconcurrent\", // Jupiter ex3400-48p\n                                   \"1.3.6.1.4.1.2636.1.1.1.2.63\" : \"getconcurrent\", // Juniper ex4300-48p\n                                   \"1.3.6.1.4.1.9.12.3.1.3.1354\" : \"getconcurrent\", // Cisco 7706 chassis\n                                   \"1.3.6.1.4.1.9.12.3.1.3.1409\" : \"getconcurrent\", // Cisco 56128P chassis\n                                   \"1.3.6.1.4.1.9.12.3.1.3.1410\" : \"getconcurrent\"] // Cisco 5672P chassis\n\n// If there isn't an explicit snmp method defined, try and infer it from the known device preferences.\nString snmpMethod = props.get(\"interface.snmp.method\")\nif (snmpMethod == null) {\n    String sysOid = props.get(\"system.sysoid\")\n    snmpMethod = deviceExtractionPreferences.getOrDefault(sysOid, \"walk\")\n    props[\"interface.snmp.method\"] = snmpMethod\n}\n\n// Allow custom filtering outside the script, accepts values \"true\" or \"false\" for host property \"interface.filtering\"\ndef disableFiltering = [\"1\", \"true\", \"on\"].contains(hostProps.get(\"interface.filtering\")?.toLowerCase())\n\n// Excluded device types\nList excludedIfTypes = [\"24\",  // softwareLoopback\n                        \"71\",  // ieee80211\n                        \"136\", // l3ipvlan\n                        \"135\"] // l2vlan\n\nList excludedIfDescStartsWith = [\"veth\",\n                                 \"lo\",\n                                 \"nu\",\n                                 \"vnet\",\n                                 \"virbr\"]\n\nList excludedIfDescContains = [\"vif\",\n                               \"stackport\",\n                               \"internal-data\",\n                               \"cplane\"]\n\n// Address and prefixes matching these prefixes will be absolutely filtered\nList reservedAddresses = [\n                            \"00:00:01:00:00:01\",            // Problematic XEROX CORPORATION MACs\n                            \"00:00:01\",                     // Cisco ASA virtual MACs\n                            \"01:00:01\",\n                            \"00:01:00:00:00:01\",\n                            \"00:08:e3\",             // Cisco unicast\n                            \"00:21:00:00:00:22\",\n                            \"00:13:00:00:00:14\",\n                            \"00:0f:b7:48:48\",\n                            \"00:16:00:00:00:16\",\n                            \"00:00:15:00:00:00\",\n                            \"00:15:00:00:00:15\",\n                            \"00:14:00:00:00:14\",\n                            \"00:14:00:00:00:15\",\n                            \"00:01:00:00:00:01\",\n                            \"00:21:00:00:00:21\",\n                            \"00:21:00:00:00:22\",\n                            \"7a:77:00:00:00:0\",\n                            \"00:00:03:00:00:00\",\n                            \"00:00:05:00:00:00\",\n                            \"00:08:e3:ff:fc:28\",            // Problematic Cisco MACs\n                            \"00:08:e3:ff:fd:90\",\n                            \"02:00:4c:4f:4f:50\", \n                            \"02:50:f2:00:00:01\", \n                            \"00:25:b5:00:00:0f\", \n                            \"00:25:b5:00:00:1f\", \n                            \"00:18:18:16\",\n                            \"12:00:00:00:00:00\",\n                            \"54:10:ec\",                     // Microchip\n                            \"00:90:fa\",                     // Emulex\n                            \"cc:4e:24\",                     // PCS\n                            \"00:90:8f\",                     // Audio codes\n                            \"38:90:a5:be\",                  // Threat Defense\n                            \"b4:0c:25:e\",                   // Palo Alto Firewall HA\n                            \"00:1b:17:00\",\n                            \"ba:db:ad\",                     // Palo Alto VMware interface\n                            \"00:a0:c9:00:00:00\",            // Firepower\n                            \"00:13:00:00:00:13\",            // Problematic LLDP chassis ID\n                            \"00:00:00\",                     // ARP\n                            \"01:00:00:00:00\",\n                            \"01:00:5e\",                     // Used for IPV4 Multicast and MLPS Multicast\n                            \"33:33\",                        // Reserved for IPV6 Multicast\n                            \"02:00:4c:4f:4f:50\",            // Microsoft Loopback adapter`\n                            \"20:41:53:59:4e:ff\",            // RAS\n                            \"00:22:bd:f8:19:ff\",            // Cisco ACI\n                            \"00:0b:ca:fe:00:00\",            // Avaya/Xen\n                            \"02:00:00\",                     // Common default\n                            \"02:00:01\",\n                            \"00:00:03\",                     // Problematic Cisco ASA mac\n                            \"00:07:b4:00\",                  // GLBP\n                            \"00:09:0f:09\",                  // Fortinet HA\n                            \"00:10:db:ff:10\",               // Internal interfaces for Juniper\n                            \"02:42:ac:11\",                  // Docker\n                            \"00:ff:c2:f3:cb:94\",            // Windows\n                            \"1e:8e:39:50:50:05:05:69:00\",   // VMware PVSCSI Controller\n                            \"c8:4f:86:fc:00\",           // Sophos virutal HA MAC\n                            \"02:0f:00:0b:98\",           //  Sophos virutal HA MAC\n                            \"0.0.0.0\",                      // Bad CDP ID and IP\n                            \"127.0.0.1\"                     // Loopback\n]\n\nList ifTypes = ['unknown', 'other', 'regular1822', 'hdh1822', 'ddnX25', 'rfc877x25', 'ethernetCsmacd', 'iso88023Csmacd', 'iso88024TokenBus',\n                'iso88025TokenRing', 'iso88026Man', 'starLan', 'proteon10Mbit', 'proteon80Mbit', 'hyperchannel', 'fddi', 'lapb',\n                'sdlc', 'ds1', 'e1', 'basicISDN', 'primaryISDN', 'propPointToPointSerial', 'ppp', 'softwareLoopback', 'eon', 'ethernet3Mbit',\n                'nsip', 'slip', 'ultra', 'ds3', 'sip', 'frameRelay', 'rs232', 'para', 'arcnet', 'arcnetPlus', 'atm', 'miox25', 'sonet', 'x25ple',\n                'iso88022llc', 'localTalk', 'smdsDxi', 'frameRelayService', 'v35', 'hssi', 'hippi', 'modem', 'aal5', 'sonetPath', 'sonetVT',\n                'smdsIcip', 'propVirtual', 'propMultiplexor', 'ieee80212', 'fibreChannel', 'hippiInterface', 'frameRelayInterconnect',\n                'aflane8023', 'aflane8025', 'cctEmul', 'fastEther', 'isdn', 'v11', 'v36', 'g703at64k', 'g703at2mb', 'qllc', 'fastEtherFX',\n                'channel', 'ieee80211', 'ibm370parChan', 'escon', 'dlsw', 'isdns', 'isdnu', 'lapd', 'ipSwitch', 'rsrb', 'atmLogical', 'ds0',\n                'ds0Bundle', 'bsc', 'async', 'cnr', 'iso88025Dtr', 'eplrs', 'arap', 'propCnls', 'hostPad', 'termPad', 'frameRelayMPI', 'x213',\n                'adsl', 'radsl', 'sdsl', 'vdsl', 'iso88025CRFPInt', 'myrinet', 'voiceEM', 'voiceFXO', 'voiceFXS', 'voiceEncap', 'voiceOverIp',\n                'atmDxi', 'atmFuni', 'atmIma', 'pppMultilinkBundle', 'ipOverCdlc', 'ipOverClaw', 'stackToStack', 'virtualIpAddress', 'mpc',\n                'ipOverAtm', 'iso88025Fiber', 'tdlc', 'gigabitEthernet', 'hdlc', 'lapf', 'v37', 'x25mlp', 'x25huntGroup', 'trasnpHdlc', 'interleave',\n                'fast', 'ip', 'docsCableMaclayer', 'docsCableDownstream', 'docsCableUpstream', 'a12MppSwitch', 'tunnel', 'coffee', 'ces',\n                'atmSubInterface', 'l2vlan', 'l3ipvlan', 'l3ipxvlan', 'digitalPowerline', 'mediaMailOverIp', 'dtm', 'dcn', 'ipForward', 'msdsl',\n                'ieee1394', 'if-gsn', 'dvbRccMacLayer', 'dvbRccDownstream', 'dvbRccUpstream', 'atmVirtual', 'mplsTunnel', 'srp', 'voiceOverAtm',\n                'voiceOverFrameRelay', 'idsl', 'compositeLink', 'ss7SigLink', 'propWirelessP2P', 'frForward', 'rfc1483', 'usb', 'ieee8023adLag',\n                'bgppolicyaccounting', 'frf16MfrBundle', 'h323Gatekeeper', 'h323Proxy', 'mpls', 'mfSigLink', 'hdsl2', 'shdsl', 'ds1FDL', 'pos',\n                'dvbAsiIn', 'dvbAsiOut', 'plc', 'nfas', 'tr008', 'gr303RDT', 'gr303IDT', 'isup', 'propDocsWirelessMaclayer',\n                'propDocsWirelessDownstream', 'propDocsWirelessUpstream', 'hiperlan2', 'propBWAp2Mp', 'sonetOverheadChannel',\n                'digitalWrapperOverheadChannel', 'aal2', 'radioMAC', 'atmRadio', 'imt', 'mvl', 'reachDSL', 'frDlciEndPt', 'atmVciEndPt',\n                'opticalChannel', 'opticalTransport', 'propAtm', 'voiceOverCable', 'infiniband', 'teLink', 'q2931', 'virtualTg', 'sipTg',\n                'sipSig', 'docsCableUpstreamChannel', 'econet', 'pon155', 'pon622', 'bridge', 'linegroup', 'voiceEMFGD', 'voiceFGDEANA',\n                'voiceDID', 'mpegTransport', 'sixToFour', 'gtp', 'pdnEtherLoop1', 'pdnEtherLoop2', 'opticalChannelGroup', 'homepna', 'gfp',\n                'ciscoISLvlan', 'actelisMetaLOOP', 'fcipLink', 'rpr', 'qam', 'lmp', 'cblVectaStar', 'docsCableMCmtsDownstream', 'adsl2',\n                'macSecControlledIF', 'macSecUncontrolledIF', 'aviciOpticalEther', 'atmbond', 'voiceFGDOS', 'mocaVersion1', 'ieee80216WMAN',\n                'adsl2plus', 'dvbRcsMacLayer', 'dvbTdm', 'dvbRcsTdma']\n\n// Lookup for ifOperStatus value.\nOPERATIONAL_STATES = [\n        \"1\": \"up\",\n        \"2\": \"down\",\n        \"3\": \"testing\",\n        \"4\": \"unknown\",\n        \"5\": \"dormant\",\n        \"6\": \"notPresent\",\n        \"7\": \"lowerLayerDown\"\n]\n\nADMIN_STATES = [\n        \"1\": \"up\",\n        \"2\": \"down\",\n        \"3\": \"testing\"\n]\n\n// Extract and filter interface table\nLMDebugPrint( \"\\nStarting to extract interfaces and their associated data:\")\n\ndef ifTable = extractInterfaces(host, props, ifMode, timeout, timeoutStart)\n\nLMDebugPrint( \"\\nifTable Contents:\\n\\t${ifTable}\\n\\n\")\n\n// Filter out invalid MACs or excluded interface types from collected interfaces\nifTable.each { ifIndex, iface ->\n    iface.mac = iface?.mac?.toLowerCase()\n    iface.valid = true\n\n    if (disableFiltering) return\n\n    if (excludedIfTypes.contains(iface.type) ||\n        excludedIfDescStartsWith.any { iface.description?.toLowerCase()?.startsWith(it) } ||\n        excludedIfDescContains.any { iface.description?.toLowerCase() =~ it }\n    ) {\n        iface.valid = false\n        return\n    }\n}\n\n// Revoke invalidation on interfaces that share a mac address with a valid port\nifTable.values().findAll { it.valid == false }.each { ifEntry ->\n    def siblings = ifTable.values().findAll { (it.mac == ifEntry.mac) && it.valid }\n    if (siblings) {\n        ifEntry.valid = true\n    }\n}\n\ndef cdpEri\ndef cdpInterfaces\ntry {\n    LMDebugPrint( \"Extracting cdpGlobalDeviceId ERI and CDP interfaces...\" )\n    cdpEri = Snmp.get(host, \"1.3.6.1.4.1.9.9.23.1.3.4.0\")\n    if (cdpEri) LMDebugPrint( \"\\tcdpGlobalDeviceId ERI: ${cdpEri}\" )\n\n    cdpInterfaces = Snmp.walkAsMap(host, \"1.3.6.1.4.1.9.9.23.1.1.1.1.6\", null, timeout)\n    if (cdpInterfaces) LMDebugPrint( \"\\tCDP interfaces: ${cdpInterfaces}\" )\n\n} catch (Exception e) { LMDebugPrint( \"\\tException while fetching CDP interfaces: ${e}\" ) }\n\nLMDebugPrint( \"\" )\n\ndef lldpEri\ndef lldpInterfaces\ntry {\n    LMDebugPrint( \"Extracting lldpLocChassisId ERI and LLDP interfaces...\" )\n\n    lldpEri = Snmp.get(host, \"1.0.8802.1.1.2.1.3.2.0\")\n    if (lldpEri) LMDebugPrint( \"\\tlldpLocChassisId ERI: ${lldpEri}\" )\n\n    lldpInterfaces = Snmp.walkAsMap(host, \"1.0.8802.1.1.2.1.3.7.1.3\", null, timeout)\n    if (lldpInterfaces) LMDebugPrint( \"\\tLLDP interfaces: ${lldpInterfaces}\" )\n\n} catch (Exception e) { LMDebugPrint( \"\\tException while fetching LLDP interfaces: ${e}\" ) }\n\nLMDebugPrint( \"\" )\n\n// Set MAC, CDP, and LLDP ERI and Interface ERT\ndef globalIfEri = []\nifTable.each { ifIndex, iface ->\n    def ifEri = []\n    if (iface.mac && isMac(iface.mac, reservedAddresses)) {\n        ifEri << \"interface:${iface.mac}\"\n    }\n\n    if (cdpEri && !reservedAddresses.find { cdpEri.startsWith(it) }) {\n        def cdpInterfaceEntry = cdpInterfaces?.find { ifIdx, cdpInterfaceEntry -> ifIdx == ifIndex   || iface?.name?.toLowerCase() == cdpInterfaceEntry?.toLowerCase()}?.value\n        if (cdpInterfaceEntry ){\n            ifEri << \"cdp-interface:${cdpEri}--${cdpInterfaceEntry}\"\n        }\n    }\n\n    if (lldpEri && !reservedAddresses.find { lldpEri.startsWith(it) }) {\n        def lldpInterfaceEntry = lldpInterfaces?.find { ifIdx, lldpInterfaceEntry -> ifIdx == ifIndex  || iface?.name?.toLowerCase() == lldpInterfaceEntry?.toLowerCase() }?.value\n        if (lldpInterfaceEntry) { \n            ifEri << \"lldp-interface:${lldpEri}--${lldpInterfaceEntry}\"\n        }\n    }\n\n    if (!ifEri.isEmpty() && !ifEri.find { globalIfEri.contains(it) }) {\n        iface['predef.externalResourceID'] = eriPreProcessor(ifEri, keyNamespace, keyBlacklist)\n        iface['predef.externalResourceType'] = \"Interface\"   \n        ifEri.each { globalIfEri << it }           \n    }  \n}\n\nifTable.each { ifIndex, ifEntry ->\n    // We can stop now if it is not valid\n    if (!ifEntry.valid) {\n        return\n    }\n\n    if (ifMode == 64) {\n        // Only create auto.interface.speed if we got a value.\n        String interfaceSpeed = ifEntry.get(\"highspeed\")\n        if (interfaceSpeed != null) {\n            ifEntry.speed = interfaceSpeed.toBigInteger() * 1000000\n        }\n    }\n\n    // Clean up for instance level properties\n    ifEntry.remove('highspeed')\n    ifEntry.remove('valid')\n    ifEntry.remove('ifAdminStatus')\n    ifEntry.remove('ifOperStatus')\n    ifEntry.remove('ifInOctets')\n    ifEntry.remove('ifOutOctets')\n\n    // Catch a null alias.\n    if (ifEntry.alias == null) ifEntry.alias = \"\"\n\n    // Catch a null type\n    def ifTypeNum = ifEntry?.type?.toBigInteger()\n    if (ifTypeNum != null) ifEntry.type = ifTypes[ifTypeNum]\n\n    ifEntry.alias       = ifEntry?.alias?.toString()?.replaceAll(/#*/, \"\")\n    ifEntry.description = ifEntry?.description?.toString()?.replaceAll(/#*/, \"\")\n\n    def description = ifEntry.alias ? \"${ifEntry.alias}\" : \"${ifEntry.name} - ${ifEntry.mac}\"\n    description = description.replace(/null - /, \"\") // If no ifEntry.name is returned, only return MAC Address.\n    if (ifEntry.alias == null && ifEntry.mac == null) description = ifEntry.name\n\n    // Now that we're done adjusting alias and description, assign them to variables accordingly for proper output\n    def alias = \"${ifEntry.description} [ID:${ifIndex}]\"\n    ifEntry.description = description?.replaceAll(/\\+/, \"%2B\")?.replaceAll(\"=\", \"%3D\")?.replaceAll(\"&\", \"%26\")\n    ifEntry.alias = ifEntry.alias?.replaceAll(/\\+/, \"%2B\")?.replaceAll(\"=\", \"%3D\")?.replaceAll(\"&\", \"%26\")\n    ifEntry.wildalias = alias\n    ifEntry.lastDiscovered = scriptStartTime\n    if(ifNameIsWV){\n        println \"${ifEntry.name}##${alias}##${description}####${ifEntry.collect { it.key.contains(\"predef\") ? \"${it}\" : \"auto.interface.${it}\" }.join(\"&\")}\"\n        currentInstances.push(ifEntry.name)\n    }\n    else{\n        println \"${ifIndex}##${alias}##${description}####${ifEntry.collect { it.key.contains(\"predef\") ? \"${it}\" : \"auto.interface.${it}\" }.join(\"&\")}\"\n        currentInstances.push(ifIndex)\n    }\n}\n\n// Logic to handle interfaces that are no longer discovered but are retained for alerting purposes for a period of time\nallInstanceProps.each { key, value ->\n    if (!currentInstances.contains(key)) {\n        if (value.'auto.interface.lastdiscovered') {\n            use(TimeCategory) {\n                // Calculate the time between the two dates\n                def timeDiff = scriptStartTime - Date.parse(\"EEE MMM dd HH:mm:ss z yyyy\", value.'auto.interface.lastdiscovered')\n                // Calculate the number of hours in the duration\n                hours = timeDiff.hours\n            }\n            // Check if number of hours since last discovery is less than allowed interval and if so reuse the instance with previous values\n            if(hours < rmvUndiscoveredInterval){\n                def propsList = []\n                // Instance props include custom and system values that are not relevant we only want to re-use auto. and predef. properties\n                value.each { propKey, propValue ->\n                    if (propKey.startsWith(\"auto.\") || propKey.startsWith(\"predef\")) {\n                        propsList.push(\"$propKey=$propValue\")\n                    }\n                }\n                println \"${key}##${value.'wildalias'}##${value.'system.instanceDescription'}####${propsList.join('&')}\"\n            }\n        }\n    }\n}\n\nLMDebugPrint(\"Script run time: ${TimeCategory.minus( new Date(), scriptStartTime )}\") \n\nreturn 0\n\n/**\n * Function to validate a MAC address and filter it out if reserved or blacklisted\n */\ndef isMac(address, reservedAddresses) {\n    if (address == null) return false\n\n    if (address.matches(\"[0-9a-f]{2}([-:]?)[0-9a-f]{2}(\\\\1[0-9a-f]{2}){4}\\$\")) {\n        if (!reservedAddresses.find { address.startsWith(it) }) {\n            return true\n        }\n    }\n    return false\n}\n\n/**\n * Function to pre process a list of ERI given a namespace and blacklist\n */\ndef eriPreProcessor(List eriList, String namespace, List blacklist) {\n    def output = []\n    eriList.each{ eri->\n        eri = eri.toLowerCase()\n        eri = eri.replace(\",\", \"_\")\n        if(!blacklist.contains(eri)) {\n            if(namespace) eri=\"${namespace.replace(\",\", \"_\")}::${eri}\"\n            output << eri\n        }\n    }\n    return output.join(\",\")\n}\n\n/**\n * Function to extract interfaces\n */\ndef extractInterfaces(host, props, ifMode, timeout, timeoutStart) {\n    Map counters = [ifAdminStatus: \"1.3.6.1.2.1.2.2.1.7\",\n                    name: \"1.3.6.1.2.1.31.1.1.1.1\",\n                    description: \"1.3.6.1.2.1.2.2.1.2\",\n                    mac: \"1.3.6.1.2.1.2.2.1.6\",\n                    type: \"1.3.6.1.2.1.2.2.1.3\",\n                    mtu: \"1.3.6.1.2.1.2.2.1.4\",\n                    alias: \"1.3.6.1.2.1.31.1.1.1.18\"]\n\n    def blockedMetrics = props.get(\"interface.blockedMetrics\", \"\").tokenize(\",\")\n    blockedMetrics.each { metric ->\n        counters.remove(metric.trim())\n    }\n\n    // If 64-bit interface, use the ifHCInOctets and ifHCOutOctets OID, otherwise use ifInOctets and ifOutOctets OID.\n    if (ifMode == 64){\n        LMDebugPrint(\"Using 64-bit interface mode\")\n        counters[\"ifInOctets\"] =  \"1.3.6.1.2.1.31.1.1.1.6\"\n        counters[\"ifOutOctets\"] = \"1.3.6.1.2.1.31.1.1.1.10\"\n        counters[\"highspeed\"] =   \"1.3.6.1.2.1.31.1.1.1.15\"\n    }\n    else {\n        LMDebugPrint(\"Using 32-bit interface mode\")\n        counters[\"speed\"] = \"1.3.6.1.2.1.2.2.1.5\"\n        counters[\"ifInOctets\"] =  \"1.3.6.1.2.1.2.2.1.10\"\n        counters[\"ifOutOctets\"] = \"1.3.6.1.2.1.2.2.1.16\"\n    }\n\n    // Lets do an initial walk with something we know will be a small return payload.\n    Map initialValues = walkSnmp([ifOperStatus: \"1.3.6.1.2.1.2.2.1.8\"], props, timeout, timeoutStart)\n\n    // Bail out of script early if the previous walk was not successful\n    // Most of our data comes from this SNMP table - if that walk fails,\n    // we aren't likely to succeed elsewhere and should not waste collector resources trying\n    if(!initialValues.ifOperStatus) {\n        throw new Exception(\"Unable to get initial interface information\")\n    }\n    \n    List knownInterfaces =  []\n    knownInterfaces.addAll(initialValues.ifOperStatus.keySet())\n\n    Map ifTable = [:]\n    knownInterfaces.each { ifIndex->\n        ifTable[ifIndex] = ['ifIndex': ifIndex]\n    }\n\n    initialValues.each {fieldName, data->\n        data.each { ifIndex, value->\n            def entry = ifTable.get(ifIndex)\n            entry[fieldName] = value\n        }\n    }\n\n    // Then we fetch all the data using the selected method\n    getData(counters, knownInterfaces, props, timeout, timeoutStart).each {fieldName, data->\n        data.each { ifIndex, value->\n            def entry = ifTable.get(ifIndex)\n            if (entry){\n                entry[fieldName] = value\n            }\n        }\n    }\n\n    // Do some post processing on the ifTable\n    ifTable.each { ifIndex, entry->\n        String mac = entry.mac\n        if(mac == null) mac = \"\"\n\n        // detect binary MACs and convert them to hex format\n        if (mac.length() == 6) {\n            byte[] macByte = mac\n            def rawMacString = macByte?.encodeHex()?.toString()\n            if (rawMacString && rawMacString.size() == 12) {\n                def formattedMac = rawMacString.split(\"(?<=\\\\G..)\").join(\":\")\n                if (formattedMac) {\n                    mac = formattedMac\n                }\n            }\n        }\n        entry.mac = mac\n    }\n\n    ifTable.each { ifIndex, entry->\n        //True of False for Incoming our Outgoing Traffic.\n        def hasInTraffic = ![null, \"0\"].contains(entry.ifInOctets)\n        def hasOutTraffic = ![null, \"0\"].contains(entry.ifOutOctets)\n\n        //Set has_traffic = true if the interface had traffic on at least the incoming or outgoing side of the interface.\n        if (hasInTraffic || hasOutTraffic){\n            entry.has_traffic = true\n        }\n        else{\n            entry.has_traffic = false\n        }\n\n        // Get operational state and lookup\n        entry['operational.state'] = OPERATIONAL_STATES.getOrDefault(entry.ifOperStatus, entry.ifOperStatus)\n        entry.remove(\"ifOperStatus\")\n        // Parse admin state\n        entry[\"admin.state\"] = ADMIN_STATES.getOrDefault(entry.ifAdminStatus, entry.ifAdminStatus)\n        entry.remove(\"ifAdminStatus\")\n\n        if (entry.name == null){\n            entry.name = \"\"\n        }\n\n    }\n\n    return ifTable\n}\n\n/**\n * Helper function to print out debug messages for troubleshooting purposes.\n */\ndef LMDebugPrint(message) {\n    if (debug) {\n        println(message.toString())\n    }\n}\n\n\n\nMap getData(Map mapCounters, List knownInterfaces, Map props, Integer timeout, Long start) {\n    String snmpMethod = props.get(\"interface.snmp.method\")\n    LMDebugPrint(\"SNMP method: ${snmpMethod}\")\n    switch (snmpMethod) {\n        case \"walk\":\n            return walkSnmp(mapCounters, props, timeout, start)\n            break\n        case \"get\":\n            return getSnmp(mapCounters, knownInterfaces, props, timeout, start)\n            break\n        case \"getconcurrent\":\n            return concurrentGetSnmp(mapCounters, knownInterfaces, props, timeout, start)\n            break\n        default:\n            LMDebugPrint(\"Invalid collection method\")\n    }\n}\n\ndef walkSnmp(Map requestedOids, Map props, Integer timeout, Long start) {\n    String hostname = props.get(\"system.hostname\")\n\n    def retries = 0\n    def output = [:]\n    while (retries < 5) {\n        if (requestedOids.size() == output.size()) { break }\n        retries++\n\n        requestedOids.each { fieldName, requestedOid ->\n            def remainingTime = Math.max(0, timeout - (System.currentTimeMillis() - start)).intValue()\n            if (remainingTime == 0) throw new Exception(\"Timeout waiting on SNMP Walks\")\n\n            if (output.containsKey(fieldName)) return // Avoid pulling something we already got.\n\n            try {\n                def response = Snmp.walkAsMap(hostname, requestedOid, props, remainingTime)\n\n                 if (response != null) {\n                    output[fieldName] = response\n                }\n            } catch (IOException ignored) {\n                // Silently ignore timeouts and wait for a bit.\n                LMDebugPrint(\"SNMP WALK to ${hostname} timed out\")\n                Thread.sleep(25)\n            }\n        }\n    }\n\n    if(output) {\n        LMDebugPrint(\"Returning ${output.size()}/${requestedOids.size()} to host ${hostname} after ${retries} retries\")\n        return  output\n    } else {\n        throw new Exception(\"No results returned for SNMP Walks\")\n    }\n}\n\ndef getSnmp(Map counters, List knownInterfaces, Map props, Integer timeout) {\n    Map dataMap = [:]\n    String hostname = props.get(\"system.hostname\")\n\n    LMDebugPrint(\"knownInterfaces has ${knownInterfaces.size()} items in it\")\n\n    counters.each { fieldName, oid ->\n        knownInterfaces.each { port ->\n            String oidToGet = oid + \".\" + port\n            def portStats = retrySnmpGet(hostname, oidToGet, props, timeout)\n\n            if (!dataMap[fieldName]) {\n                dataMap[fieldName] = [:]\n            }\n            dataMap[fieldName][port] = portStats\n        }\n    }\n    return dataMap\n}\n\ndef concurrentGetSnmp(Map counters, List knownInterfaces, Map props, Integer timeout, Long start) {\n    Map dataMap = [:]\n    String hostname = props.get(\"system.hostname\")\n\n    def threadpool_size = Math.max(Math.min((hostProps.get(\"interface.poolsize\") ?: \"20\").toInteger(), 30), 1)\n    LMDebugPrint(\"Concurrent SNMP GET using ${threadpool_size} threads\")\n    def thread_pool = Executors.newFixedThreadPool(threadpool_size)\n\n    def script_timeout = Settings.getSetting(\"collector.batchscript.timeout\").toInteger() * 1000\n    def timer_start = System.currentTimeMillis()\n    try {\n        def lock = new ReentrantLock()\n\n        counters.each { metric, oid ->\n            knownInterfaces.each { port ->\n                thread_pool.submit {\n                    String oidToGet = oid + \".\" + port\n                    def portStats = retrySnmpGet(hostname, oidToGet, props, timeout, start)\n                    lock.lock()\n                    try {\n                        if (!dataMap[metric]) {\n                            dataMap[metric] = [:]\n                        }\n                        dataMap[metric][port] = portStats\n                    }\n                    finally {\n                        lock.unlock()\n                    }\n                }\n            }\n        }\n    }\n    finally {\n        // Initiate an orderly shutdown of the thread pool\n        thread_pool.shutdown()\n\n        // Calculate the remaining execution time\n        def remaining_time = ((script_timeout - System.currentTimeMillis() + timer_start) - 2000)\n\n        // Block until the script times out or all tasks have finished executing\n        thread_pool.awaitTermination(remaining_time, TimeUnit.MILLISECONDS)\n\n        // Force all remaining tasks in the pool to abort.\n        thread_pool.shutdownNow()\n    }\n\n    return dataMap\n}\n\ndef retrySnmpGet(String hostname, String requestedOid, Map props, Integer timeout, Long start) {\n    def retries = 0\n    while (retries < 5) {\n        retries++\n\n        def remainingTime = Math.max(0, timeout - (System.currentTimeMillis() - start)).intValue()\n        if (remainingTime == 0) break\n\n        remainingTime  = Math.min(remainingTime, 1500)\n\n        try {\n            return Snmp.get(hostname, requestedOid, props, remainingTime)\n        } catch (IOException ignored) {\n            // Silently ignore timeouts and wait for a bit.\n            LMDebugPrint(\"SNMP GET to ${requestedOid} timed out, waiting\")\n            Thread.sleep(25)\n        }\n    }\n\n    LMDebugPrint(\"SNMP GET ${requestedOid} to ${hostname} failed after ${retries} retries \")\n}"}}]]></adlist>
+        <schemaVersion>2</schemaVersion>
+        <dataSourceType>1</dataSourceType>
+        <attributes>
+        <attribute>
+            <name>scripttype</name>
+            <value>embed</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>scriptgroovy</name>
+            <value>/*******************************************************************************
+ * © 2007-2023 - LogicMonitor, Inc. All rights reserved.
+ *
+ * Default SNMP collection method is &#34;walk&#34; for all interfaces.
+ * To change the default SNMP collection method, set the host or group property
+ * &#34;interface.snmp.method&#34; to &#34;get&#34; or &#34;getconcurrent&#34;.
+ *
+ * The &#34;walk&#34; method retrieves all interfaces at once.
+ * The &#34;get&#34; method retrieves known active interfaces one at a time.
+ * The &#34;getconcurrent&#34; method retrieves known active interfaces in bulk.
+ *
+ * Some collection methods work better than others on certain deployments.
+ * Devices with known issues will be updated within the script
+ * for optimal collection preference.
+ ******************************************************************************/
+
+import com.santaba.agent.groovyapi.snmp.Snmp
+
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
+import com.santaba.agent.util.Settings
+import groovy.time.TimeCategory
+
+def scriptStartTime = new Date()
+
+def host = hostProps.get(&#34;system.hostname&#34;)
+Map props = hostProps.toProperties().collectEntries{ k,v-&#62; [(k.toLowerCase()):v]}
+def ifMode = props.getOrDefault(&#34;interface.mode&#34;, props.getOrDefault(&#34;auto.interface.mode&#34;, &#34;64&#34;)).toInteger()
+def timeoutStart = System.currentTimeMillis() // Used for timeout calculations
+def smallTimeout = 1500 // Timeout in MS used for small gets
+def timeout = Settings.getSettingInt(&#34;collector.batchscript.timeout&#34;, 
+                                     Settings.getSettingInt(&#34;collector.script.timeout&#34;, 
+                                                            120)) * 1000
+timeout -= 2500 // Allow a small buffer for the script to clean up after itself.
+
+def keyNamespace = hostProps.get(hostProps.get(&#34;topo.namespace&#34;, &#34;&#34;), &#34;&#34;)
+def keyBlacklist = hostProps.get(&#34;topo.blacklist&#34;, &#34;&#34;).tokenize(&#34;,&#34;)
+Boolean ifNameIsWV = props.get(&#34;interface.ifnameaswildvalue&#34;) ?: false
+// Time is in hours, default 2 weeks 
+Integer rmvUndiscoveredInterval = props.get(&#34;interface.removeUndiscoveredInterval&#34;) ?: 336 
+
+// Support added for Collector versions 29.105+ to retrieve instanceProps with datasourceinstanceProps.
+allInstanceProps = [:]
+
+datasourceinstanceProps.each{ instance, instanceProperties -&#62;
+    def instanceProp = [:]
+    for (key in instanceProperties.keySet()) {
+        instanceProp[key] = instanceProperties.get(key)
+    }
+    allInstanceProps.put(instanceProperties.get(&#34;wildvalue&#34;), instanceProp)
+}
+
+// List to hold instances discovered later in the script
+currentInstances = []
+
+// To run in debug mode, set to true
+debug = false
+
+// Set the known problematic sysoids here.
+Map deviceExtractionPreferences = [&#34;1.3.6.1.4.1.2636.1.1.1.2.43&#34; : &#34;getconcurrent&#34;, // Juniper ex2200-48t-4g
+                                   &#34;1.3.6.1.4.1.2636.1.1.1.1.131&#34;: &#34;getconcurrent&#34;, // Jupiter ex3400-48p
+                                   &#34;1.3.6.1.4.1.2636.1.1.1.2.63&#34; : &#34;getconcurrent&#34;, // Juniper ex4300-48p
+                                   &#34;1.3.6.1.4.1.9.12.3.1.3.1354&#34; : &#34;getconcurrent&#34;, // Cisco 7706 chassis
+                                   &#34;1.3.6.1.4.1.9.12.3.1.3.1409&#34; : &#34;getconcurrent&#34;, // Cisco 56128P chassis
+                                   &#34;1.3.6.1.4.1.9.12.3.1.3.1410&#34; : &#34;getconcurrent&#34;] // Cisco 5672P chassis
+
+// If there isn&#39;t an explicit snmp method defined, try and infer it from the known device preferences.
+String snmpMethod = props.get(&#34;interface.snmp.method&#34;)
+if (snmpMethod == null) {
+    String sysOid = props.get(&#34;system.sysoid&#34;)
+    snmpMethod = deviceExtractionPreferences.getOrDefault(sysOid, &#34;walk&#34;)
+    props[&#34;interface.snmp.method&#34;] = snmpMethod
+}
+
+// Allow custom filtering outside the script, accepts values &#34;true&#34; or &#34;false&#34; for host property &#34;interface.filtering&#34;
+def disableFiltering = [&#34;1&#34;, &#34;true&#34;, &#34;on&#34;].contains(hostProps.get(&#34;interface.filtering&#34;)?.toLowerCase())
+
+// Excluded device types
+List excludedIfTypes = [&#34;24&#34;,  // softwareLoopback
+                        &#34;71&#34;,  // ieee80211
+                        &#34;136&#34;, // l3ipvlan
+                        &#34;135&#34;] // l2vlan
+
+List excludedIfDescStartsWith = [&#34;veth&#34;,
+                                 &#34;lo&#34;,
+                                 &#34;nu&#34;,
+                                 &#34;vnet&#34;,
+                                 &#34;virbr&#34;]
+
+List excludedIfDescContains = [&#34;vif&#34;,
+                               &#34;stackport&#34;,
+                               &#34;internal-data&#34;,
+                               &#34;cplane&#34;]
+
+// Address and prefixes matching these prefixes will be absolutely filtered
+List reservedAddresses = [
+                            &#34;00:00:01:00:00:01&#34;,            // Problematic XEROX CORPORATION MACs
+                            &#34;00:00:01&#34;,                     // Cisco ASA virtual MACs
+                            &#34;01:00:01&#34;,
+                            &#34;00:01:00:00:00:01&#34;,
+                            &#34;00:08:e3&#34;,             // Cisco unicast
+                            &#34;00:21:00:00:00:22&#34;,
+                            &#34;00:13:00:00:00:14&#34;,
+                            &#34;00:0f:b7:48:48&#34;,
+                            &#34;00:16:00:00:00:16&#34;,
+                            &#34;00:00:15:00:00:00&#34;,
+                            &#34;00:15:00:00:00:15&#34;,
+                            &#34;00:14:00:00:00:14&#34;,
+                            &#34;00:14:00:00:00:15&#34;,
+                            &#34;00:01:00:00:00:01&#34;,
+                            &#34;00:21:00:00:00:21&#34;,
+                            &#34;00:21:00:00:00:22&#34;,
+                            &#34;7a:77:00:00:00:0&#34;,
+                            &#34;00:00:03:00:00:00&#34;,
+                            &#34;00:00:05:00:00:00&#34;,
+                            &#34;00:08:e3:ff:fc:28&#34;,            // Problematic Cisco MACs
+                            &#34;00:08:e3:ff:fd:90&#34;,
+                            &#34;02:00:4c:4f:4f:50&#34;, 
+                            &#34;02:50:f2:00:00:01&#34;, 
+                            &#34;00:25:b5:00:00:0f&#34;, 
+                            &#34;00:25:b5:00:00:1f&#34;, 
+                            &#34;00:18:18:16&#34;,
+                            &#34;12:00:00:00:00:00&#34;,
+                            &#34;54:10:ec&#34;,                     // Microchip
+                            &#34;00:90:fa&#34;,                     // Emulex
+                            &#34;cc:4e:24&#34;,                     // PCS
+                            &#34;00:90:8f&#34;,                     // Audio codes
+                            &#34;38:90:a5:be&#34;,                  // Threat Defense
+                            &#34;b4:0c:25:e&#34;,                   // Palo Alto Firewall HA
+                            &#34;00:1b:17:00&#34;,
+                            &#34;ba:db:ad&#34;,                     // Palo Alto VMware interface
+                            &#34;00:a0:c9:00:00:00&#34;,            // Firepower
+                            &#34;00:13:00:00:00:13&#34;,            // Problematic LLDP chassis ID
+                            &#34;00:00:00&#34;,                     // ARP
+                            &#34;01:00:00:00:00&#34;,
+                            &#34;01:00:5e&#34;,                     // Used for IPV4 Multicast and MLPS Multicast
+                            &#34;33:33&#34;,                        // Reserved for IPV6 Multicast
+                            &#34;02:00:4c:4f:4f:50&#34;,            // Microsoft Loopback adapter`
+                            &#34;20:41:53:59:4e:ff&#34;,            // RAS
+                            &#34;00:22:bd:f8:19:ff&#34;,            // Cisco ACI
+                            &#34;00:0b:ca:fe:00:00&#34;,            // Avaya/Xen
+                            &#34;02:00:00&#34;,                     // Common default
+                            &#34;02:00:01&#34;,
+                            &#34;00:00:03&#34;,                     // Problematic Cisco ASA mac
+                            &#34;00:07:b4:00&#34;,                  // GLBP
+                            &#34;00:09:0f:09&#34;,                  // Fortinet HA
+                            &#34;00:10:db:ff:10&#34;,               // Internal interfaces for Juniper
+                            &#34;02:42:ac:11&#34;,                  // Docker
+                            &#34;00:ff:c2:f3:cb:94&#34;,            // Windows
+                            &#34;1e:8e:39:50:50:05:05:69:00&#34;,   // VMware PVSCSI Controller
+                            &#34;c8:4f:86:fc:00&#34;,           // Sophos virutal HA MAC
+                            &#34;02:0f:00:0b:98&#34;,           //  Sophos virutal HA MAC
+                            &#34;0.0.0.0&#34;,                      // Bad CDP ID and IP
+                            &#34;127.0.0.1&#34;                     // Loopback
+]
+
+List ifTypes = [&#39;unknown&#39;, &#39;other&#39;, &#39;regular1822&#39;, &#39;hdh1822&#39;, &#39;ddnX25&#39;, &#39;rfc877x25&#39;, &#39;ethernetCsmacd&#39;, &#39;iso88023Csmacd&#39;, &#39;iso88024TokenBus&#39;,
+                &#39;iso88025TokenRing&#39;, &#39;iso88026Man&#39;, &#39;starLan&#39;, &#39;proteon10Mbit&#39;, &#39;proteon80Mbit&#39;, &#39;hyperchannel&#39;, &#39;fddi&#39;, &#39;lapb&#39;,
+                &#39;sdlc&#39;, &#39;ds1&#39;, &#39;e1&#39;, &#39;basicISDN&#39;, &#39;primaryISDN&#39;, &#39;propPointToPointSerial&#39;, &#39;ppp&#39;, &#39;softwareLoopback&#39;, &#39;eon&#39;, &#39;ethernet3Mbit&#39;,
+                &#39;nsip&#39;, &#39;slip&#39;, &#39;ultra&#39;, &#39;ds3&#39;, &#39;sip&#39;, &#39;frameRelay&#39;, &#39;rs232&#39;, &#39;para&#39;, &#39;arcnet&#39;, &#39;arcnetPlus&#39;, &#39;atm&#39;, &#39;miox25&#39;, &#39;sonet&#39;, &#39;x25ple&#39;,
+                &#39;iso88022llc&#39;, &#39;localTalk&#39;, &#39;smdsDxi&#39;, &#39;frameRelayService&#39;, &#39;v35&#39;, &#39;hssi&#39;, &#39;hippi&#39;, &#39;modem&#39;, &#39;aal5&#39;, &#39;sonetPath&#39;, &#39;sonetVT&#39;,
+                &#39;smdsIcip&#39;, &#39;propVirtual&#39;, &#39;propMultiplexor&#39;, &#39;ieee80212&#39;, &#39;fibreChannel&#39;, &#39;hippiInterface&#39;, &#39;frameRelayInterconnect&#39;,
+                &#39;aflane8023&#39;, &#39;aflane8025&#39;, &#39;cctEmul&#39;, &#39;fastEther&#39;, &#39;isdn&#39;, &#39;v11&#39;, &#39;v36&#39;, &#39;g703at64k&#39;, &#39;g703at2mb&#39;, &#39;qllc&#39;, &#39;fastEtherFX&#39;,
+                &#39;channel&#39;, &#39;ieee80211&#39;, &#39;ibm370parChan&#39;, &#39;escon&#39;, &#39;dlsw&#39;, &#39;isdns&#39;, &#39;isdnu&#39;, &#39;lapd&#39;, &#39;ipSwitch&#39;, &#39;rsrb&#39;, &#39;atmLogical&#39;, &#39;ds0&#39;,
+                &#39;ds0Bundle&#39;, &#39;bsc&#39;, &#39;async&#39;, &#39;cnr&#39;, &#39;iso88025Dtr&#39;, &#39;eplrs&#39;, &#39;arap&#39;, &#39;propCnls&#39;, &#39;hostPad&#39;, &#39;termPad&#39;, &#39;frameRelayMPI&#39;, &#39;x213&#39;,
+                &#39;adsl&#39;, &#39;radsl&#39;, &#39;sdsl&#39;, &#39;vdsl&#39;, &#39;iso88025CRFPInt&#39;, &#39;myrinet&#39;, &#39;voiceEM&#39;, &#39;voiceFXO&#39;, &#39;voiceFXS&#39;, &#39;voiceEncap&#39;, &#39;voiceOverIp&#39;,
+                &#39;atmDxi&#39;, &#39;atmFuni&#39;, &#39;atmIma&#39;, &#39;pppMultilinkBundle&#39;, &#39;ipOverCdlc&#39;, &#39;ipOverClaw&#39;, &#39;stackToStack&#39;, &#39;virtualIpAddress&#39;, &#39;mpc&#39;,
+                &#39;ipOverAtm&#39;, &#39;iso88025Fiber&#39;, &#39;tdlc&#39;, &#39;gigabitEthernet&#39;, &#39;hdlc&#39;, &#39;lapf&#39;, &#39;v37&#39;, &#39;x25mlp&#39;, &#39;x25huntGroup&#39;, &#39;trasnpHdlc&#39;, &#39;interleave&#39;,
+                &#39;fast&#39;, &#39;ip&#39;, &#39;docsCableMaclayer&#39;, &#39;docsCableDownstream&#39;, &#39;docsCableUpstream&#39;, &#39;a12MppSwitch&#39;, &#39;tunnel&#39;, &#39;coffee&#39;, &#39;ces&#39;,
+                &#39;atmSubInterface&#39;, &#39;l2vlan&#39;, &#39;l3ipvlan&#39;, &#39;l3ipxvlan&#39;, &#39;digitalPowerline&#39;, &#39;mediaMailOverIp&#39;, &#39;dtm&#39;, &#39;dcn&#39;, &#39;ipForward&#39;, &#39;msdsl&#39;,
+                &#39;ieee1394&#39;, &#39;if-gsn&#39;, &#39;dvbRccMacLayer&#39;, &#39;dvbRccDownstream&#39;, &#39;dvbRccUpstream&#39;, &#39;atmVirtual&#39;, &#39;mplsTunnel&#39;, &#39;srp&#39;, &#39;voiceOverAtm&#39;,
+                &#39;voiceOverFrameRelay&#39;, &#39;idsl&#39;, &#39;compositeLink&#39;, &#39;ss7SigLink&#39;, &#39;propWirelessP2P&#39;, &#39;frForward&#39;, &#39;rfc1483&#39;, &#39;usb&#39;, &#39;ieee8023adLag&#39;,
+                &#39;bgppolicyaccounting&#39;, &#39;frf16MfrBundle&#39;, &#39;h323Gatekeeper&#39;, &#39;h323Proxy&#39;, &#39;mpls&#39;, &#39;mfSigLink&#39;, &#39;hdsl2&#39;, &#39;shdsl&#39;, &#39;ds1FDL&#39;, &#39;pos&#39;,
+                &#39;dvbAsiIn&#39;, &#39;dvbAsiOut&#39;, &#39;plc&#39;, &#39;nfas&#39;, &#39;tr008&#39;, &#39;gr303RDT&#39;, &#39;gr303IDT&#39;, &#39;isup&#39;, &#39;propDocsWirelessMaclayer&#39;,
+                &#39;propDocsWirelessDownstream&#39;, &#39;propDocsWirelessUpstream&#39;, &#39;hiperlan2&#39;, &#39;propBWAp2Mp&#39;, &#39;sonetOverheadChannel&#39;,
+                &#39;digitalWrapperOverheadChannel&#39;, &#39;aal2&#39;, &#39;radioMAC&#39;, &#39;atmRadio&#39;, &#39;imt&#39;, &#39;mvl&#39;, &#39;reachDSL&#39;, &#39;frDlciEndPt&#39;, &#39;atmVciEndPt&#39;,
+                &#39;opticalChannel&#39;, &#39;opticalTransport&#39;, &#39;propAtm&#39;, &#39;voiceOverCable&#39;, &#39;infiniband&#39;, &#39;teLink&#39;, &#39;q2931&#39;, &#39;virtualTg&#39;, &#39;sipTg&#39;,
+                &#39;sipSig&#39;, &#39;docsCableUpstreamChannel&#39;, &#39;econet&#39;, &#39;pon155&#39;, &#39;pon622&#39;, &#39;bridge&#39;, &#39;linegroup&#39;, &#39;voiceEMFGD&#39;, &#39;voiceFGDEANA&#39;,
+                &#39;voiceDID&#39;, &#39;mpegTransport&#39;, &#39;sixToFour&#39;, &#39;gtp&#39;, &#39;pdnEtherLoop1&#39;, &#39;pdnEtherLoop2&#39;, &#39;opticalChannelGroup&#39;, &#39;homepna&#39;, &#39;gfp&#39;,
+                &#39;ciscoISLvlan&#39;, &#39;actelisMetaLOOP&#39;, &#39;fcipLink&#39;, &#39;rpr&#39;, &#39;qam&#39;, &#39;lmp&#39;, &#39;cblVectaStar&#39;, &#39;docsCableMCmtsDownstream&#39;, &#39;adsl2&#39;,
+                &#39;macSecControlledIF&#39;, &#39;macSecUncontrolledIF&#39;, &#39;aviciOpticalEther&#39;, &#39;atmbond&#39;, &#39;voiceFGDOS&#39;, &#39;mocaVersion1&#39;, &#39;ieee80216WMAN&#39;,
+                &#39;adsl2plus&#39;, &#39;dvbRcsMacLayer&#39;, &#39;dvbTdm&#39;, &#39;dvbRcsTdma&#39;]
+
+// Lookup for ifOperStatus value.
+OPERATIONAL_STATES = [
+        &#34;1&#34;: &#34;up&#34;,
+        &#34;2&#34;: &#34;down&#34;,
+        &#34;3&#34;: &#34;testing&#34;,
+        &#34;4&#34;: &#34;unknown&#34;,
+        &#34;5&#34;: &#34;dormant&#34;,
+        &#34;6&#34;: &#34;notPresent&#34;,
+        &#34;7&#34;: &#34;lowerLayerDown&#34;
+]
+
+ADMIN_STATES = [
+        &#34;1&#34;: &#34;up&#34;,
+        &#34;2&#34;: &#34;down&#34;,
+        &#34;3&#34;: &#34;testing&#34;
+]
+
+// Extract and filter interface table
+LMDebugPrint( &#34;\nStarting to extract interfaces and their associated data:&#34;)
+
+def ifTable = extractInterfaces(host, props, ifMode, timeout, timeoutStart)
+
+LMDebugPrint( &#34;\nifTable Contents:\n\t${ifTable}\n\n&#34;)
+
+// Filter out invalid MACs or excluded interface types from collected interfaces
+ifTable.each { ifIndex, iface -&#62;
+    iface.mac = iface?.mac?.toLowerCase()
+    iface.valid = true
+
+    if (disableFiltering) return
+
+    if (excludedIfTypes.contains(iface.type) ||
+        excludedIfDescStartsWith.any { iface.description?.toLowerCase()?.startsWith(it) } ||
+        excludedIfDescContains.any { iface.description?.toLowerCase() =~ it }
+    ) {
+        iface.valid = false
+        return
+    }
+}
+
+// Revoke invalidation on interfaces that share a mac address with a valid port
+ifTable.values().findAll { it.valid == false }.each { ifEntry -&#62;
+    def siblings = ifTable.values().findAll { (it.mac == ifEntry.mac) &#38;&#38; it.valid }
+    if (siblings) {
+        ifEntry.valid = true
+    }
+}
+
+def cdpEri
+def cdpInterfaces
+try {
+    LMDebugPrint( &#34;Extracting cdpGlobalDeviceId ERI and CDP interfaces...&#34; )
+    cdpEri = Snmp.get(host, &#34;1.3.6.1.4.1.9.9.23.1.3.4.0&#34;)
+    if (cdpEri) LMDebugPrint( &#34;\tcdpGlobalDeviceId ERI: ${cdpEri}&#34; )
+
+    cdpInterfaces = Snmp.walkAsMap(host, &#34;1.3.6.1.4.1.9.9.23.1.1.1.1.6&#34;, null, timeout)
+    if (cdpInterfaces) LMDebugPrint( &#34;\tCDP interfaces: ${cdpInterfaces}&#34; )
+
+} catch (Exception e) { LMDebugPrint( &#34;\tException while fetching CDP interfaces: ${e}&#34; ) }
+
+LMDebugPrint( &#34;&#34; )
+
+def lldpEri
+def lldpInterfaces
+try {
+    LMDebugPrint( &#34;Extracting lldpLocChassisId ERI and LLDP interfaces...&#34; )
+
+    lldpEri = Snmp.get(host, &#34;1.0.8802.1.1.2.1.3.2.0&#34;)
+    if (lldpEri) LMDebugPrint( &#34;\tlldpLocChassisId ERI: ${lldpEri}&#34; )
+
+    lldpInterfaces = Snmp.walkAsMap(host, &#34;1.0.8802.1.1.2.1.3.7.1.3&#34;, null, timeout)
+    if (lldpInterfaces) LMDebugPrint( &#34;\tLLDP interfaces: ${lldpInterfaces}&#34; )
+
+} catch (Exception e) { LMDebugPrint( &#34;\tException while fetching LLDP interfaces: ${e}&#34; ) }
+
+LMDebugPrint( &#34;&#34; )
+
+// Set MAC, CDP, and LLDP ERI and Interface ERT
+def globalIfEri = []
+ifTable.each { ifIndex, iface -&#62;
+    def ifEri = []
+    if (iface.mac &#38;&#38; isMac(iface.mac, reservedAddresses)) {
+        ifEri &#60;&#60; &#34;interface:${iface.mac}&#34;
+    }
+
+    if (cdpEri &#38;&#38; !reservedAddresses.find { cdpEri.startsWith(it) }) {
+        def cdpInterfaceEntry = cdpInterfaces?.find { ifIdx, cdpInterfaceEntry -&#62; ifIdx == ifIndex   || iface?.name?.toLowerCase() == cdpInterfaceEntry?.toLowerCase()}?.value
+        if (cdpInterfaceEntry ){
+            ifEri &#60;&#60; &#34;cdp-interface:${cdpEri}--${cdpInterfaceEntry}&#34;
+        }
+    }
+
+    if (lldpEri &#38;&#38; !reservedAddresses.find { lldpEri.startsWith(it) }) {
+        def lldpInterfaceEntry = lldpInterfaces?.find { ifIdx, lldpInterfaceEntry -&#62; ifIdx == ifIndex  || iface?.name?.toLowerCase() == lldpInterfaceEntry?.toLowerCase() }?.value
+        if (lldpInterfaceEntry) { 
+            ifEri &#60;&#60; &#34;lldp-interface:${lldpEri}--${lldpInterfaceEntry}&#34;
+        }
+    }
+
+    if (!ifEri.isEmpty() &#38;&#38; !ifEri.find { globalIfEri.contains(it) }) {
+        iface[&#39;predef.externalResourceID&#39;] = eriPreProcessor(ifEri, keyNamespace, keyBlacklist)
+        iface[&#39;predef.externalResourceType&#39;] = &#34;Interface&#34;   
+        ifEri.each { globalIfEri &#60;&#60; it }           
+    }  
+}
+
+ifTable.each { ifIndex, ifEntry -&#62;
+    // We can stop now if it is not valid
+    if (!ifEntry.valid) {
+        return
+    }
+
+    if (ifMode == 64) {
+        // Only create auto.interface.speed if we got a value.
+        String interfaceSpeed = ifEntry.get(&#34;highspeed&#34;)
+        if (interfaceSpeed != null) {
+            ifEntry.speed = interfaceSpeed.toBigInteger() * 1000000
+        }
+    }
+
+    // Clean up for instance level properties
+    ifEntry.remove(&#39;highspeed&#39;)
+    ifEntry.remove(&#39;valid&#39;)
+    ifEntry.remove(&#39;ifAdminStatus&#39;)
+    ifEntry.remove(&#39;ifOperStatus&#39;)
+    ifEntry.remove(&#39;ifInOctets&#39;)
+    ifEntry.remove(&#39;ifOutOctets&#39;)
+
+    // Catch a null alias.
+    if (ifEntry.alias == null) ifEntry.alias = &#34;&#34;
+
+    // Catch a null type
+    def ifTypeNum = ifEntry?.type?.toBigInteger()
+    if (ifTypeNum != null) ifEntry.type = ifTypes[ifTypeNum]
+
+    ifEntry.alias       = ifEntry?.alias?.toString()?.replaceAll(/#*/, &#34;&#34;)
+    ifEntry.description = ifEntry?.description?.toString()?.replaceAll(/#*/, &#34;&#34;)
+
+    def description = ifEntry.alias ? &#34;${ifEntry.alias}&#34; : &#34;${ifEntry.name} - ${ifEntry.mac}&#34;
+    description = description.replace(/null - /, &#34;&#34;) // If no ifEntry.name is returned, only return MAC Address.
+    if (ifEntry.alias == null &#38;&#38; ifEntry.mac == null) description = ifEntry.name
+
+    // Now that we&#39;re done adjusting alias and description, assign them to variables accordingly for proper output
+    def alias = &#34;${ifEntry.description} [ID:${ifIndex}]&#34;
+    ifEntry.description = description?.replaceAll(/\+/, &#34;%2B&#34;)?.replaceAll(&#34;=&#34;, &#34;%3D&#34;)?.replaceAll(&#34;&#38;&#34;, &#34;%26&#34;)
+    ifEntry.alias = ifEntry.alias?.replaceAll(/\+/, &#34;%2B&#34;)?.replaceAll(&#34;=&#34;, &#34;%3D&#34;)?.replaceAll(&#34;&#38;&#34;, &#34;%26&#34;)
+    ifEntry.wildalias = alias
+    ifEntry.lastDiscovered = scriptStartTime
+    if(ifNameIsWV){
+        println &#34;${ifEntry.name}##${alias}##${description}####${ifEntry.collect { it.key.contains(&#34;predef&#34;) ? &#34;${it}&#34; : &#34;auto.interface.${it}&#34; }.join(&#34;&#38;&#34;)}&#34;
+        currentInstances.push(ifEntry.name)
+    }
+    else{
+        println &#34;${ifIndex}##${alias}##${description}####${ifEntry.collect { it.key.contains(&#34;predef&#34;) ? &#34;${it}&#34; : &#34;auto.interface.${it}&#34; }.join(&#34;&#38;&#34;)}&#34;
+        currentInstances.push(ifIndex)
+    }
+}
+
+// Logic to handle interfaces that are no longer discovered but are retained for alerting purposes for a period of time
+allInstanceProps.each { key, value -&#62;
+    if (!currentInstances.contains(key)) {
+        if (value.&#39;auto.interface.lastdiscovered&#39;) {
+            use(TimeCategory) {
+                // Calculate the time between the two dates
+                def timeDiff = scriptStartTime - Date.parse(&#34;EEE MMM dd HH:mm:ss z yyyy&#34;, value.&#39;auto.interface.lastdiscovered&#39;)
+                // Calculate the number of hours in the duration
+                hours = timeDiff.hours
+            }
+            // Check if number of hours since last discovery is less than allowed interval and if so reuse the instance with previous values
+            if(hours &#60; rmvUndiscoveredInterval){
+                def propsList = []
+                // Instance props include custom and system values that are not relevant we only want to re-use auto. and predef. properties
+                value.each { propKey, propValue -&#62;
+                    if (propKey.startsWith(&#34;auto.&#34;) || propKey.startsWith(&#34;predef&#34;)) {
+                        propsList.push(&#34;$propKey=$propValue&#34;)
+                    }
+                }
+                println &#34;${key}##${value.&#39;wildalias&#39;}##${value.&#39;system.instanceDescription&#39;}####${propsList.join(&#39;&#38;&#39;)}&#34;
+            }
+        }
+    }
+}
+
+LMDebugPrint(&#34;Script run time: ${TimeCategory.minus( new Date(), scriptStartTime )}&#34;) 
+
+return 0
+
+/**
+ * Function to validate a MAC address and filter it out if reserved or blacklisted
+ */
+def isMac(address, reservedAddresses) {
+    if (address == null) return false
+
+    if (address.matches(&#34;[0-9a-f]{2}([-:]?)[0-9a-f]{2}(\\1[0-9a-f]{2}){4}\$&#34;)) {
+        if (!reservedAddresses.find { address.startsWith(it) }) {
+            return true
+        }
+    }
+    return false
+}
+
+/**
+ * Function to pre process a list of ERI given a namespace and blacklist
+ */
+def eriPreProcessor(List eriList, String namespace, List blacklist) {
+    def output = []
+    eriList.each{ eri-&#62;
+        eri = eri.toLowerCase()
+        eri = eri.replace(&#34;,&#34;, &#34;_&#34;)
+        if(!blacklist.contains(eri)) {
+            if(namespace) eri=&#34;${namespace.replace(&#34;,&#34;, &#34;_&#34;)}::${eri}&#34;
+            output &#60;&#60; eri
+        }
+    }
+    return output.join(&#34;,&#34;)
+}
+
+/**
+ * Function to extract interfaces
+ */
+def extractInterfaces(host, props, ifMode, timeout, timeoutStart) {
+    Map counters = [ifAdminStatus: &#34;1.3.6.1.2.1.2.2.1.7&#34;,
+                    name: &#34;1.3.6.1.2.1.31.1.1.1.1&#34;,
+                    description: &#34;1.3.6.1.2.1.2.2.1.2&#34;,
+                    mac: &#34;1.3.6.1.2.1.2.2.1.6&#34;,
+                    type: &#34;1.3.6.1.2.1.2.2.1.3&#34;,
+                    mtu: &#34;1.3.6.1.2.1.2.2.1.4&#34;,
+                    alias: &#34;1.3.6.1.2.1.31.1.1.1.18&#34;]
+
+    def blockedMetrics = props.get(&#34;interface.blockedMetrics&#34;, &#34;&#34;).tokenize(&#34;,&#34;)
+    blockedMetrics.each { metric -&#62;
+        counters.remove(metric.trim())
+    }
+
+    // If 64-bit interface, use the ifHCInOctets and ifHCOutOctets OID, otherwise use ifInOctets and ifOutOctets OID.
+    if (ifMode == 64){
+        LMDebugPrint(&#34;Using 64-bit interface mode&#34;)
+        counters[&#34;ifInOctets&#34;] =  &#34;1.3.6.1.2.1.31.1.1.1.6&#34;
+        counters[&#34;ifOutOctets&#34;] = &#34;1.3.6.1.2.1.31.1.1.1.10&#34;
+        counters[&#34;highspeed&#34;] =   &#34;1.3.6.1.2.1.31.1.1.1.15&#34;
+    }
+    else {
+        LMDebugPrint(&#34;Using 32-bit interface mode&#34;)
+        counters[&#34;speed&#34;] = &#34;1.3.6.1.2.1.2.2.1.5&#34;
+        counters[&#34;ifInOctets&#34;] =  &#34;1.3.6.1.2.1.2.2.1.10&#34;
+        counters[&#34;ifOutOctets&#34;] = &#34;1.3.6.1.2.1.2.2.1.16&#34;
+    }
+
+    // Lets do an initial walk with something we know will be a small return payload.
+    Map initialValues = walkSnmp([ifOperStatus: &#34;1.3.6.1.2.1.2.2.1.8&#34;], props, timeout, timeoutStart)
+
+    // Bail out of script early if the previous walk was not successful
+    // Most of our data comes from this SNMP table - if that walk fails,
+    // we aren&#39;t likely to succeed elsewhere and should not waste collector resources trying
+    if(!initialValues.ifOperStatus) {
+        throw new Exception(&#34;Unable to get initial interface information&#34;)
+    }
+    
+    List knownInterfaces =  []
+    knownInterfaces.addAll(initialValues.ifOperStatus.keySet())
+
+    Map ifTable = [:]
+    knownInterfaces.each { ifIndex-&#62;
+        ifTable[ifIndex] = [&#39;ifIndex&#39;: ifIndex]
+    }
+
+    initialValues.each {fieldName, data-&#62;
+        data.each { ifIndex, value-&#62;
+            def entry = ifTable.get(ifIndex)
+            entry[fieldName] = value
+        }
+    }
+
+    // Then we fetch all the data using the selected method
+    getData(counters, knownInterfaces, props, timeout, timeoutStart).each {fieldName, data-&#62;
+        data.each { ifIndex, value-&#62;
+            def entry = ifTable.get(ifIndex)
+            if (entry){
+                entry[fieldName] = value
+            }
+        }
+    }
+
+    // Do some post processing on the ifTable
+    ifTable.each { ifIndex, entry-&#62;
+        String mac = entry.mac
+        if(mac == null) mac = &#34;&#34;
+
+        // detect binary MACs and convert them to hex format
+        if (mac.length() == 6) {
+            byte[] macByte = mac
+            def rawMacString = macByte?.encodeHex()?.toString()
+            if (rawMacString &#38;&#38; rawMacString.size() == 12) {
+                def formattedMac = rawMacString.split(&#34;(?&#60;=\\G..)&#34;).join(&#34;:&#34;)
+                if (formattedMac) {
+                    mac = formattedMac
+                }
+            }
+        }
+        entry.mac = mac
+    }
+
+    ifTable.each { ifIndex, entry-&#62;
+        //True of False for Incoming our Outgoing Traffic.
+        def hasInTraffic = ![null, &#34;0&#34;].contains(entry.ifInOctets)
+        def hasOutTraffic = ![null, &#34;0&#34;].contains(entry.ifOutOctets)
+
+        //Set has_traffic = true if the interface had traffic on at least the incoming or outgoing side of the interface.
+        if (hasInTraffic || hasOutTraffic){
+            entry.has_traffic = true
+        }
+        else{
+            entry.has_traffic = false
+        }
+
+        // Get operational state and lookup
+        entry[&#39;operational.state&#39;] = OPERATIONAL_STATES.getOrDefault(entry.ifOperStatus, entry.ifOperStatus)
+        entry.remove(&#34;ifOperStatus&#34;)
+        // Parse admin state
+        entry[&#34;admin.state&#34;] = ADMIN_STATES.getOrDefault(entry.ifAdminStatus, entry.ifAdminStatus)
+        entry.remove(&#34;ifAdminStatus&#34;)
+
+        if (entry.name == null){
+            entry.name = &#34;&#34;
+        }
+
+    }
+
+    return ifTable
+}
+
+/**
+ * Helper function to print out debug messages for troubleshooting purposes.
+ */
+def LMDebugPrint(message) {
+    if (debug) {
+        println(message.toString())
+    }
+}
+
+
+
+Map getData(Map mapCounters, List knownInterfaces, Map props, Integer timeout, Long start) {
+    String snmpMethod = props.get(&#34;interface.snmp.method&#34;)
+    LMDebugPrint(&#34;SNMP method: ${snmpMethod}&#34;)
+    switch (snmpMethod) {
+        case &#34;walk&#34;:
+            return walkSnmp(mapCounters, props, timeout, start)
+            break
+        case &#34;get&#34;:
+            return getSnmp(mapCounters, knownInterfaces, props, timeout, start)
+            break
+        case &#34;getconcurrent&#34;:
+            return concurrentGetSnmp(mapCounters, knownInterfaces, props, timeout, start)
+            break
+        default:
+            LMDebugPrint(&#34;Invalid collection method&#34;)
+    }
+}
+
+def walkSnmp(Map requestedOids, Map props, Integer timeout, Long start) {
+    String hostname = props.get(&#34;system.hostname&#34;)
+
+    def retries = 0
+    def output = [:]
+    while (retries &#60; 5) {
+        if (requestedOids.size() == output.size()) { break }
+        retries++
+
+        requestedOids.each { fieldName, requestedOid -&#62;
+            def remainingTime = Math.max(0, timeout - (System.currentTimeMillis() - start)).intValue()
+            if (remainingTime == 0) throw new Exception(&#34;Timeout waiting on SNMP Walks&#34;)
+
+            if (output.containsKey(fieldName)) return // Avoid pulling something we already got.
+
+            try {
+                def response = Snmp.walkAsMap(hostname, requestedOid, props, remainingTime)
+
+                 if (response != null) {
+                    output[fieldName] = response
+                }
+            } catch (IOException ignored) {
+                // Silently ignore timeouts and wait for a bit.
+                LMDebugPrint(&#34;SNMP WALK to ${hostname} timed out&#34;)
+                Thread.sleep(25)
+            }
+        }
+    }
+
+    if(output) {
+        LMDebugPrint(&#34;Returning ${output.size()}/${requestedOids.size()} to host ${hostname} after ${retries} retries&#34;)
+        return  output
+    } else {
+        throw new Exception(&#34;No results returned for SNMP Walks&#34;)
+    }
+}
+
+def getSnmp(Map counters, List knownInterfaces, Map props, Integer timeout) {
+    Map dataMap = [:]
+    String hostname = props.get(&#34;system.hostname&#34;)
+
+    LMDebugPrint(&#34;knownInterfaces has ${knownInterfaces.size()} items in it&#34;)
+
+    counters.each { fieldName, oid -&#62;
+        knownInterfaces.each { port -&#62;
+            String oidToGet = oid + &#34;.&#34; + port
+            def portStats = retrySnmpGet(hostname, oidToGet, props, timeout)
+
+            if (!dataMap[fieldName]) {
+                dataMap[fieldName] = [:]
+            }
+            dataMap[fieldName][port] = portStats
+        }
+    }
+    return dataMap
+}
+
+def concurrentGetSnmp(Map counters, List knownInterfaces, Map props, Integer timeout, Long start) {
+    Map dataMap = [:]
+    String hostname = props.get(&#34;system.hostname&#34;)
+
+    def threadpool_size = Math.max(Math.min((hostProps.get(&#34;interface.poolsize&#34;) ?: &#34;20&#34;).toInteger(), 30), 1)
+    LMDebugPrint(&#34;Concurrent SNMP GET using ${threadpool_size} threads&#34;)
+    def thread_pool = Executors.newFixedThreadPool(threadpool_size)
+
+    def script_timeout = Settings.getSetting(&#34;collector.batchscript.timeout&#34;).toInteger() * 1000
+    def timer_start = System.currentTimeMillis()
+    try {
+        def lock = new ReentrantLock()
+
+        counters.each { metric, oid -&#62;
+            knownInterfaces.each { port -&#62;
+                thread_pool.submit {
+                    String oidToGet = oid + &#34;.&#34; + port
+                    def portStats = retrySnmpGet(hostname, oidToGet, props, timeout, start)
+                    lock.lock()
+                    try {
+                        if (!dataMap[metric]) {
+                            dataMap[metric] = [:]
+                        }
+                        dataMap[metric][port] = portStats
+                    }
+                    finally {
+                        lock.unlock()
+                    }
+                }
+            }
+        }
+    }
+    finally {
+        // Initiate an orderly shutdown of the thread pool
+        thread_pool.shutdown()
+
+        // Calculate the remaining execution time
+        def remaining_time = ((script_timeout - System.currentTimeMillis() + timer_start) - 2000)
+
+        // Block until the script times out or all tasks have finished executing
+        thread_pool.awaitTermination(remaining_time, TimeUnit.MILLISECONDS)
+
+        // Force all remaining tasks in the pool to abort.
+        thread_pool.shutdownNow()
+    }
+
+    return dataMap
+}
+
+def retrySnmpGet(String hostname, String requestedOid, Map props, Integer timeout, Long start) {
+    def retries = 0
+    while (retries &#60; 5) {
+        retries++
+
+        def remainingTime = Math.max(0, timeout - (System.currentTimeMillis() - start)).intValue()
+        if (remainingTime == 0) break
+
+        remainingTime  = Math.min(remainingTime, 1500)
+
+        try {
+            return Snmp.get(hostname, requestedOid, props, remainingTime)
+        } catch (IOException ignored) {
+            // Silently ignore timeouts and wait for a bit.
+            LMDebugPrint(&#34;SNMP GET to ${requestedOid} timed out, waiting&#34;)
+            Thread.sleep(25)
+        }
+    }
+
+    LMDebugPrint(&#34;SNMP GET ${requestedOid} to ${hostname} failed after ${retries} retries &#34;)
+}</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>windowsscript</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>linuxscript</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>windowscmdline</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>linuxcmdline</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>__filter_0</name>
+            <value>auto.interface.name	RegexNotMatch	Internal-Data|cplane</value>
+            <comment>Exclude internal and cplane interfaces.</comment>
+        </attribute>
+        <attribute>
+            <name>__filter_1</name>
+            <value>auto.interface.name	NotContain	vif</value>
+            <comment>Exclude virtual interfaces on Xen servers.</comment>
+        </attribute>
+        <attribute>
+            <name>__filter_2</name>
+            <value>auto.interface.type	NotEqual	ieee80211</value>
+            <comment>Exclude dot11 radios (have own datasource)</comment>
+        </attribute>
+        <attribute>
+            <name>__filter_3</name>
+            <value>auto.interface.type	NotEqual	softwareLoopback</value>
+            <comment>Exclude software loopbacks.</comment>
+        </attribute>
+        <attribute>
+            <name>__filter_4</name>
+            <value>auto.interface.name	RegexNotMatch	^Lo|wifi|^Nu</value>
+            <comment>Exclude loopbacks, wifi and Null interfaces.</comment>
+        </attribute>
+        <attribute>
+            <name>__filter_5</name>
+            <value>auto.interface.type	RegexNotMatch	(l2vlan)|(l3ipvlan)</value>
+            <comment>Exclude 802.1q vlan sub ints (L2 or L3) - they have their own datasource.</comment>
+        </attribute>
+        <attribute>
+            <name>__filter_6</name>
+            <value>auto.interface.operational.state	Equal	up</value>
+            <comment>Show interfaces that are up.</comment>
+        </attribute>
+        <attribute>
+            <name>__filter_7</name>
+            <value>auto.interface.has_traffic	Equal	true</value>
+            <comment>Show interfaces with traffic.</comment>
+        </attribute>
+        </attributes>
+        <datapoints>
+        <datapoint>
+            <name>AdminState</name>
+            <originId>xhguvJdfT-y5762G_reESA</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.AdminState</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>The desired state of an interface based on the interface configuration by the administrator.
+
+1=up,
+2=down,
+3=testing</description>
+            <maxvalue>3</maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>InBroadcastPkts</name>
+            <originId>y_mREGuYT_yHubcnB57ADA</originId>
+            <dataType>7</dataType>
+            <type>3</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.InBroadcastPkts</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr>&#62; 10000</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody>There are ##VALUE## broadcast packets per second on ##INSTANCE## placing the device into ##LEVEL## state.
+
+##DSIDESCRIPTION## on ##HOST##.
+
+This started at ##START## - or ##DURATION## ago.
+
+Note that excess broadcast packets can indicate a misconfigured layer 2 switch topology, such as a loop in the network that’s causing a broadcast storm, or a rogue DHCP server.</alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Inbound broadcast packets per second. Only applies to 64-bit interfaces.</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>3</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>InDiscards</name>
+            <originId>vTYkPXw7T6CqPF0KU9D5gg</originId>
+            <dataType>7</dataType>
+            <type>3</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.InDiscards</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Number of inbound packets which were discarded even though they had no errors. 
+
+One reason for discarding a packet is lack of buffers.</description>
+            <maxvalue>1488000</maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>InErrors</name>
+            <originId>6UPSgs4cRdyFG06Yc3i3Bg</originId>
+            <dataType>7</dataType>
+            <type>3</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.ifInErrors</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr>&#62; 1</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody>The host ##HOST## is experiencing an unusual number of  inbound packets which were discarded with errors.
+There are now ##VALUE## per second discarded incoming packets on ##INSTANCE## ##DSIDESCRIPTION##, putting the host in a ##LEVEL## level.
+This started at  ##START##, or ##DURATION## ago.
+This could be caused by duplex mismatches or other causes.</alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Number of inbound packets/sec with errors.</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>3</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>InInterfaceSpeed</name>
+            <originId>iBfpbtJQR0i2abR2IB1M0A</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.InInterfaceSpeed</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Inbound interface speed used for calculating utilization percentages.</description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>InMbps</name>
+            <originId>Z7Gt77QJSCCyfjNV21vCdQ</originId>
+            <dataType>7</dataType>
+            <type>1</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.InMbps</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Inbound throughput, in megabits per second. Due to how some devices populate this value, an upper bound of 1TB/sec has been set to prevent spikes due to counter wraps.</description>
+            <maxvalue>1000000</maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>InMulticastPkts</name>
+            <originId>Ck5DrRHgT8SbUM-hJdiE6Q</originId>
+            <dataType>7</dataType>
+            <type>3</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.InMulticastPkts</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Inbound multicast packets per second. Only applies to 64-bit interfaces.</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>InNUcastPkts</name>
+            <originId>-HluU6yYQt66ksyJewtlhA</originId>
+            <dataType>7</dataType>
+            <type>3</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.InNUcastPkts</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>The number of inbound, non-unicast packets. Only applies to 32-bit interfaces.</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>3</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>InOctets</name>
+            <originId>fVu4-ViOTZuDdzYD4pAaig</originId>
+            <dataType>7</dataType>
+            <type>1</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.InOctets</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>The total number of octets received on the interface, including framing characters.</description>
+            <maxvalue>1250000000000</maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>InTotalPkts</name>
+            <originId>BpPzrk8QQ2m3BYcHd5FZfQ</originId>
+            <dataType>7</dataType>
+            <type>3</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.InTotalPkts</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Total number of incoming packets, which also include discarded packets.
+
+For 32-bit interfaces, it totals: InNUcastPkts, InUcastPkts
+For 64-bit interfaces, it totals: InMulticastPkts, InBroadcastPkts, InUcastPkts</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>InUcastPkts</name>
+            <originId>eASOZ9jRS1ahUsV9nawLtQ</originId>
+            <dataType>7</dataType>
+            <type>3</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.InUcastPkts</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>The number of inbound unicast packets returned by the 32 bit counter.</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>NetflowEnabled</name>
+            <originId>lJXPZItjT72Hr_S2Bc3P4A</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.NetflowEnabled</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Checks if the host is netflow enabled.
+
+Status codes:
+0=false,
+1=true</description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>OperState</name>
+            <originId>AMEpMcdTRVmdp33a6eBdxg</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.OperState</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Operational status of the interface.
+
+Status codes:
+1=Up - Ready to pass packets,
+2=Down,
+3=Testing - in a test mode,
+4=Unknown - status cannot be determined,
+5=Dormant - interface is not actually in a condition to pass packets (i.e., it is not &#39;up&#39;) but is in a &#34;pending&#34; state, waiting for some external event.,
+6=Not Present - some component is missing,
+7=Lower Layer Down - down due to state of a lower-layer interface(s).</description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>OutBroadcastPkts</name>
+            <originId>JguTKv0AQz6qA9jI0RQtYw</originId>
+            <dataType>7</dataType>
+            <type>3</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.OutBroadcastPkts</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Outbound broadcast packets per second. Only applies to 64-bit interfaces.</description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>OutDiscards</name>
+            <originId>pbgG_VMpSrK_lXx2YzLeDA</originId>
+            <dataType>7</dataType>
+            <type>3</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.OutDiscards</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>The number of outbound packets which were discarded even though they had no errors. One reason for discarding a packet is lack of buffers.</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>OutErrors</name>
+            <originId>rK8Se0KWQy6a455S1uJIzg</originId>
+            <dataType>7</dataType>
+            <type>3</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.ifOutErrors</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr>&#62; 1</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody>The host ##HOST## is experiencing an unusual number of  outbound packets which were discarded with errors.
+There are now ##VALUE## per second discarded outgoing packets on ##INSTANCE## ##DSIDESCRIPTION##, putting the host in a ##LEVEL## level.
+This started at  ##START##, or ##DURATION## ago.
+This could be caused by duplex mismatches or other causes.</alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Number of outbound packets/sec with errors.</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>3</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>OutInterfaceSpeed</name>
+            <originId>TL8uyXamQ7mRCSeDtniKJQ</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.OutInterfaceSpeed</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Outbound interface speed used for calculating utilization percentages.</description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>OutMbps</name>
+            <originId>8GNh-cEbTxCcqCvvakvtsg</originId>
+            <dataType>7</dataType>
+            <type>1</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.OutMbps</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Outbound throughput, in megabits per second. Due to how some devices populate this value, an upper bound of 1TB/sec has been set to prevent spikes due to counter wraps.</description>
+            <maxvalue>1000000</maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>OutMulticastPkts</name>
+            <originId>XPPggiA7QnKa43a9cmNcdA</originId>
+            <dataType>7</dataType>
+            <type>3</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.OutMulticastPkts</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Outbound multicast packets per second. Only applies to 64-bit interfaces.</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>OutNUcastPkts</name>
+            <originId>aCUd558xRYCCaDx4vE39uA</originId>
+            <dataType>7</dataType>
+            <type>3</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.OutNUcastPkts</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>The number of outbound, non-unicast packets. Only applies to 32-bit interfaces.</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>OutOctets</name>
+            <originId>ulcvR0YuSD6M2ggUro8-RQ</originId>
+            <dataType>7</dataType>
+            <type>1</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.OutOctets</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>The total number of octets transmitted on the interface, including framing characters.</description>
+            <maxvalue>1250000000000</maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>OutTotalPkts</name>
+            <originId>u5FImg5tTbyW05Tl7ProdA</originId>
+            <dataType>7</dataType>
+            <type>3</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.OutTotalPkts</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Total number of outgoing packets, which also include discarded packets.
+
+For 32-bit interfaces, it totals: OutNUcastPkts, OutUcastPkts
+For 64-bit interfaces, it totals: OutMulticastPkts, OutBroadcastPkts, OutUcastPkts</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>OutUcastPkts</name>
+            <originId>RPXMBQZQRmiIr5CQppFgEg</originId>
+            <dataType>7</dataType>
+            <type>3</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.OutUcastPkts</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Outbound unicast packets/sec.  This is the value returned by the 32-bit counter.</description>
+            <maxvalue></maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>Status</name>
+            <originId>BxqgVtV1T3inBuByda0vBQ</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.Status</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr>&#62; 1</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody>Interface ##INSTANCE## ##DSIDESCRIPTION## on ##HOST## has gone down and reporting the value ##VALUE##, placing the interface into ##LEVEL## state.
+
+This started at ##START## - or ##DURATION## ago.
+
+-1=Alerting Disabled, as Interface doesn&#39;t match alert enabling properties
+0=Administratively Down
+1=Up - Ready to pass packets,
+2=Down,
+3=Testing - in a test mode,
+4=Unknown - status cannot be determined,
+5=Dormant - interface is not actually in a condition to pass packets (i.e., it is not &#39;up&#39;) but is in a &#34;pending&#34; state, waiting for some external event.,
+6=Not Present - some component is missing,
+7=Lower Layer Down - down due to state of a lower-layer interface(s).</alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>If the interface is under administrative maintenance, we return a 0.  Otherwise, we return the value of OperState.  Status code summary below:
+
+Status codes:
+-1=Alerting Disabled, as Interface doesn&#39;t match alert enabling properties,
+0=Administratively down,
+1=Up - Ready to pass packets,
+2=Down,
+3=Testing - in a test mode,
+4=Unknown - status cannot be determined,
+5=Dormant - interface is not actually in a condition to pass packets (i.e., it is not &#39;up&#39;) but is in a &#34;pending&#34; state, waiting for some external event.,
+6=Not Present - some component is missing,
+7=Lower Layer Down - down due to state of a lower-layer interface(s).</description>
+            <maxvalue>7</maxvalue>
+            <minvalue>-1</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>StatusFlap</name>
+            <originId>G8cw7X0rRYiWl2Y8i7Qs2w</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.Flap</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr>= 1</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody>Network interface ##INSTANCE## ##DSIDESCRIPTION## on ##HOST## is up, but has flapped multiple times (interface went up and down multiple times), reporting the value ##VALUE##, placing the device into ##LEVEL## state.
+
+Flapping is commonly caused by bad cables and/or duplex mismatch.
+
+This started at ##START##, -- or ##DURATION## ago.
+
+Status Code:
+-1 = Alerts Disabled,
+0 = No Flap Detected,
+1 = Flap Detected</alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Measures if the interface up but is flapping over repeated poll intervals.
+If interface is UP, but the time the status last changed was within a poll cycle, alert (subject to alert transition interval.)
+The test of sysUptime being &#62; ifLastChange is to guard against uptime counter wraps.  This calculation is done in the collection script.
+
+Status Code:
+-1 = Alerts Disabled,
+0 = No Flap Detected,
+1 = Flap Detected</description>
+            <maxvalue>1</maxvalue>
+            <minvalue>-1</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>InDiscardPercent</name>
+            <originId>SOIvlRd3ReKpmMVRKWfzxA</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>expression</postprocessormethod>
+            <postprocessorparam>if(gt(InDiscards,50) &#38;&#38; gt(InTotalPkts,0), (InDiscards/InTotalPkts)*100, 0)</postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr>&#62; 2</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody>The host ##HOST## is experiencing an unusual number of inbound packets which were discarded even though they had no errors. 
+There are now ##VALUE## % discarded incoming packets on ##INSTANCE## ##DSIDESCRIPTION##, putting the host in a ##LEVEL## level.
+This started at  ##START##, or ##DURATION## ago.
+This could be caused by network floods, lack of buffers, or other causes. Check flow control settings, speed/duplex settings. QoS configuration may help.</alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Percentage of inbound packets which were discarded even though they had no errors. 
+
+One reason for discarding a packet is running out of buffer.</description>
+            <maxvalue>100</maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>InUtilizationPercent</name>
+            <originId>ywTymLcgQRWDWPrKRT2zuA</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>expression</postprocessormethod>
+            <postprocessorparam>(8*InOctets/InInterfaceSpeed)*100</postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Percentage of the inbound bandwidth of the interface that&#39;s in use.</description>
+            <maxvalue>100</maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>NetflowInUtilizationPercent</name>
+            <originId>OgnA1lLPT0ixr1rw9NTUQw</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>expression</postprocessormethod>
+            <postprocessorparam>if(eq(NetflowEnabled,1),((InOctets/InInterfaceSpeed)*100),0)</postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject>##INSTANCE## on Netflow host ##HOSTNAME## has exceeded ##THRESHOLD##%</alertsubject>
+            <alertbody>Interface ##INSTANCE## (##DSIDESCRIPTION##) on Netflow enabled host ##HOST## is experiencing high inbound utilization of ##VALUE##%, placing the instance into ##LEVEL## state.
+
+Additional Netflow context:
+##DEVICEURL##/traffic/alertepoch/##STARTEPOCH##/durationmts/120
+
+This started at ##START##, -- or ##DURATION## ago.</alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>For netflow enabled devices, percentage of the inbound bandwidth of the interface that&#39;s in use.
+
+By default, the alert threshold is not set.</description>
+            <maxvalue>100</maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>NetflowOutUtilizationPercent</name>
+            <originId>STNul4I_RGW3KJh_qAAORQ</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>expression</postprocessormethod>
+            <postprocessorparam>if(eq(NetflowEnabled,1),((OutOctets/OutInterfaceSpeed)*100),0)</postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject>##INSTANCE## on Netflow host ##HOSTNAME## has exceeded ##THRESHOLD##%</alertsubject>
+            <alertbody>Interface ##INSTANCE## (##DSIDESCRIPTION##) on Netflow enabled host ##HOST## is experiencing high outbound utilization of ##VALUE##%, placing the instance into ##LEVEL## state.
+
+Additional Netflow context:
+##DEVICEURL##/traffic/alertepoch/##STARTEPOCH##/durationmts/120
+
+This started at ##START##, -- or ##DURATION## ago.</alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>For netflow enabled devices, percentage of the outbound bandwidth of the interface that&#39;s in use.
+
+By default, the alert threshold is not set.</description>
+            <maxvalue>100</maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>OutDiscardPercent</name>
+            <originId>dQ4Pt9WsQEaJH96Yr95O5A</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>expression</postprocessormethod>
+            <postprocessorparam>if(gt(OutTotalPkts,0), (OutDiscards/OutTotalPkts)*100, 0)</postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr>&#62; 2</alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody>The host ##HOST## is experiencing an unusual number of  outbound packets which were discarded even though they had no errors. One reason for discarding a packet is lack of buffers.
+There are now ##VALUE## % of packets discarded outbound packets on ##INSTANCE## ##DSIDESCRIPTION##, putting the host in a ##LEVEL## level.
+This started at  ##START##, or ##DURATION## ago.Check flow control. QoS adjustments may help.</alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Percentage of outbound packets which were discarded even though they had no errors. 
+
+One reason for discarding a packet is running out of buffer.</description>
+            <maxvalue>100</maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>OutUtilizationPercent</name>
+            <originId>mC_yK_qaQ1WvHZpdJvwIzw</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>expression</postprocessormethod>
+            <postprocessorparam>(8*OutOctets/OutInterfaceSpeed)*100</postprocessorparam>
+            <usevalue></usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description>Percentage of the outbound bandwidth of the interface that&#39;s in use.</description>
+            <maxvalue>100</maxvalue>
+            <minvalue>0</minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        </datapoints>
+        <graphs>
+        <graph>
+            <name>Discard Percentage</name>
+            <title>Discard Percentage</title>
+            <originId></originId>            <verticallabel>%</verticallabel>
+            <rigid>false</rigid>
+            <maxvalue>100.0</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>5</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>InDiscardPercent</name>
+            <datapointname>InDiscardPercent</datapointname>
+            <originId></originId>
+            <cf>2</cf>
+        </graphdatapoint>
+        <graphdatapoint>
+            <name>OutDiscardPercent</name>
+            <datapointname>OutDiscardPercent</datapointname>
+            <originId></originId>
+            <cf>2</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>1</type>
+                <legend>Inbound</legend>
+                <color>orange2</color>
+                <datapointname>InDiscardPercent</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            <graphdata>
+                <type>1</type>
+                <legend>Outbound</legend>
+                <color>red2</color>
+                <datapointname>OutDiscardPercent</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        <graph>
+            <name>Error and Discard Rate</name>
+            <title>Error and Discard Rate</title>
+            <originId></originId>            <verticallabel>packets/sec</verticallabel>
+            <rigid>false</rigid>
+            <maxvalue>NaN</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>4</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>InDiscards</name>
+            <datapointname>InDiscards</datapointname>
+            <originId></originId>
+            <cf>1</cf>
+        </graphdatapoint>
+        <graphdatapoint>
+            <name>InErrors</name>
+            <datapointname>InErrors</datapointname>
+            <originId></originId>
+            <cf>1</cf>
+        </graphdatapoint>
+        <graphdatapoint>
+            <name>OutDiscards</name>
+            <datapointname>OutDiscards</datapointname>
+            <originId></originId>
+            <cf>1</cf>
+        </graphdatapoint>
+        <graphdatapoint>
+            <name>OutErrors</name>
+            <datapointname>OutErrors</datapointname>
+            <originId></originId>
+            <cf>1</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>1</type>
+                <legend>Inbound Discards</legend>
+                <color>orange2</color>
+                <datapointname>InDiscards</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            <graphdata>
+                <type>1</type>
+                <legend>Inbound Errors</legend>
+                <color>orange</color>
+                <datapointname>InErrors</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            <graphdata>
+                <type>1</type>
+                <legend>Outbound Discards</legend>
+                <color>red2</color>
+                <datapointname>OutDiscards</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            <graphdata>
+                <type>1</type>
+                <legend>Outbound Errors</legend>
+                <color>fuchsia</color>
+                <datapointname>OutErrors</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        <graph>
+            <name>Interface Utilization</name>
+            <title>Interface Utilization</title>
+            <originId></originId>            <verticallabel>%</verticallabel>
+            <rigid>false</rigid>
+            <maxvalue>100.0</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>2</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>InUtilizationPercent</name>
+            <datapointname>InUtilizationPercent</datapointname>
+            <originId></originId>
+            <cf>1</cf>
+        </graphdatapoint>
+        <graphdatapoint>
+            <name>OutUtilizationPercent</name>
+            <datapointname>OutUtilizationPercent</datapointname>
+            <originId></originId>
+            <cf>1</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>1</type>
+                <legend>Inbound Utilization</legend>
+                <color>blue</color>
+                <datapointname>InUtilizationPercent</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            <graphdata>
+                <type>1</type>
+                <legend>Outbound Utilization</legend>
+                <color>olive</color>
+                <datapointname>OutUtilizationPercent</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        <graph>
+            <name>Operating Status</name>
+            <title>Operating Status</title>
+            <originId></originId>            <verticallabel>status code</verticallabel>
+            <rigid>false</rigid>
+            <maxvalue>8.0</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>6</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>OperState</name>
+            <datapointname>OperState</datapointname>
+            <originId></originId>
+            <cf>2</cf>
+        </graphdatapoint>
+        <graphdatapoint>
+            <name>Status</name>
+            <datapointname>Status</datapointname>
+            <originId></originId>
+            <cf>2</cf>
+        </graphdatapoint>
+        <graphdatapoint>
+            <name>StatusFlap</name>
+            <datapointname>StatusFlap</datapointname>
+            <originId></originId>
+            <cf>2</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+        <graphvirtualdatapoint>
+            <name>FlappingDetected</name>
+            <rpn>if(un(statusFlap),unkn(),if(gt(statusFlap,0),1,0))</rpn>
+            <originId></originId>
+        </graphvirtualdatapoint>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>2</type>
+                <legend>Flapping Detected (1)</legend>
+                <color>red</color>
+                <datapointname>FlappingDetected</datapointname>
+                <isvirtualdatapoint>true</isvirtualdatapoint>
+            </graphdata>
+            <graphdata>
+                <type>1</type>
+                <legend>Operating Status (raw)</legend>
+                <color>silver</color>
+                <datapointname>OperState</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            <graphdata>
+                <type>1</type>
+                <legend>Operating Status (filtered alert)</legend>
+                <color>teal</color>
+                <datapointname>Status</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        <graph>
+            <name>Packet Transmission</name>
+            <title>Packet Transmission</title>
+            <originId></originId>            <verticallabel>packets/sec</verticallabel>
+            <rigid>false</rigid>
+            <maxvalue>NaN</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>3</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>InBroadcastPkts</name>
+            <datapointname>InBroadcastPkts</datapointname>
+            <originId></originId>
+            <cf>2</cf>
+        </graphdatapoint>
+        <graphdatapoint>
+            <name>InMulticastPkts</name>
+            <datapointname>InMulticastPkts</datapointname>
+            <originId></originId>
+            <cf>2</cf>
+        </graphdatapoint>
+        <graphdatapoint>
+            <name>InNUcastPkts</name>
+            <datapointname>InNUcastPkts</datapointname>
+            <originId></originId>
+            <cf>2</cf>
+        </graphdatapoint>
+        <graphdatapoint>
+            <name>InUcastPkts</name>
+            <datapointname>InUcastPkts</datapointname>
+            <originId></originId>
+            <cf>2</cf>
+        </graphdatapoint>
+        <graphdatapoint>
+            <name>OutBroadcastPkts</name>
+            <datapointname>OutBroadcastPkts</datapointname>
+            <originId></originId>
+            <cf>2</cf>
+        </graphdatapoint>
+        <graphdatapoint>
+            <name>OutMulticastPkts</name>
+            <datapointname>OutMulticastPkts</datapointname>
+            <originId></originId>
+            <cf>2</cf>
+        </graphdatapoint>
+        <graphdatapoint>
+            <name>OutNUcastPkts</name>
+            <datapointname>OutNUcastPkts</datapointname>
+            <originId></originId>
+            <cf>2</cf>
+        </graphdatapoint>
+        <graphdatapoint>
+            <name>OutUcastPkts</name>
+            <datapointname>OutUcastPkts</datapointname>
+            <originId></originId>
+            <cf>2</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+        <graphvirtualdatapoint>
+            <name>InNonUni64</name>
+            <rpn>InMulticastPkts+InBroadcastPkts</rpn>
+            <originId></originId>
+        </graphvirtualdatapoint>
+        <graphvirtualdatapoint>
+            <name>InNUcastPkts32</name>
+            <rpn>InNUcastPkts</rpn>
+            <originId></originId>
+        </graphvirtualdatapoint>
+        <graphvirtualdatapoint>
+            <name>OutNonUni64</name>
+            <rpn>OutMulticastPkts+OutBroadcastPkts</rpn>
+            <originId></originId>
+        </graphvirtualdatapoint>
+        <graphvirtualdatapoint>
+            <name>OutNUcastPkts32</name>
+            <rpn>OutNUcastPkts</rpn>
+            <originId></originId>
+        </graphvirtualdatapoint>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>1</type>
+                <legend>Inbound Non-Unicast</legend>
+                <color>aqua</color>
+                <datapointname>InNUcastPkts32</datapointname>
+                <isvirtualdatapoint>true</isvirtualdatapoint>
+            </graphdata>
+            <graphdata>
+                <type>1</type>
+                <legend>Inbound Non-Unicast</legend>
+                <color>aqua</color>
+                <datapointname>InNonUni64</datapointname>
+                <isvirtualdatapoint>true</isvirtualdatapoint>
+            </graphdata>
+            <graphdata>
+                <type>1</type>
+                <legend>Inbound Unicast</legend>
+                <color>navy</color>
+                <datapointname>InUcastPkts</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            <graphdata>
+                <type>1</type>
+                <legend>Outbound Non-Unicast</legend>
+                <color>lime</color>
+                <datapointname>OutNUcastPkts32</datapointname>
+                <isvirtualdatapoint>true</isvirtualdatapoint>
+            </graphdata>
+            <graphdata>
+                <type>1</type>
+                <legend>Outbound Non-Unicast</legend>
+                <color>lime</color>
+                <datapointname>OutNonUni64</datapointname>
+                <isvirtualdatapoint>true</isvirtualdatapoint>
+            </graphdata>
+            <graphdata>
+                <type>1</type>
+                <legend>Outbound Unicast</legend>
+                <color>olive</color>
+                <datapointname>OutUcastPkts</datapointname>
+                <isvirtualdatapoint>false</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        <graph>
+            <name>Throughput</name>
+            <title>Throughput</title>
+            <originId></originId>            <verticallabel>bps</verticallabel>
+            <rigid>false</rigid>
+            <maxvalue>NaN</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>1</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <graphdatapoints>
+        <graphdatapoint>
+            <name>InOctets</name>
+            <datapointname>InOctets</datapointname>
+            <originId></originId>
+            <cf>1</cf>
+        </graphdatapoint>
+        <graphdatapoint>
+            <name>OutOctets</name>
+            <datapointname>OutOctets</datapointname>
+            <originId></originId>
+            <cf>1</cf>
+        </graphdatapoint>
+            </graphdatapoints>
+            <graphvirtualdatapoints>
+        <graphvirtualdatapoint>
+            <name>InBps</name>
+            <rpn>InOctets*8</rpn>
+            <originId></originId>
+        </graphvirtualdatapoint>
+        <graphvirtualdatapoint>
+            <name>OutBps</name>
+            <rpn>OutOctets*8</rpn>
+            <originId></originId>
+        </graphvirtualdatapoint>
+        <graphvirtualdatapoint>
+            <name>In95</name>
+            <rpn>percent(InBps,95)</rpn>
+            <originId></originId>
+        </graphvirtualdatapoint>
+        <graphvirtualdatapoint>
+            <name>Out95</name>
+            <rpn>percent(OutBps,95)</rpn>
+            <originId></originId>
+        </graphvirtualdatapoint>
+            </graphvirtualdatapoints>
+            <graphdatas>
+            <graphdata>
+                <type>1</type>
+                <legend>Inbound (95th Percentile) : Number of inbound bits/sec.</legend>
+                <color>silver</color>
+                <datapointname>In95</datapointname>
+                <isvirtualdatapoint>true</isvirtualdatapoint>
+            </graphdata>
+            <graphdata>
+                <type>1</type>
+                <legend>Inbound : Number of inbound bits/sec.</legend>
+                <color>aqua</color>
+                <datapointname>InBps</datapointname>
+                <isvirtualdatapoint>true</isvirtualdatapoint>
+            </graphdata>
+            <graphdata>
+                <type>1</type>
+                <legend>Outbound (95th Percentile) : Number of outbound bits/sec.</legend>
+                <color>green</color>
+                <datapointname>Out95</datapointname>
+                <isvirtualdatapoint>true</isvirtualdatapoint>
+            </graphdata>
+            <graphdata>
+                <type>1</type>
+                <legend>Outbound : Number of outbound bits/sec.</legend>
+                <color>lime</color>
+                <datapointname>OutBps</datapointname>
+                <isvirtualdatapoint>true</isvirtualdatapoint>
+            </graphdata>
+            </graphdatas>
+        </graph>
+        </graphs>
+        <overviewgraphs>
+        <overviewgraph>
+            <name>Top 10 Interfaces by Inbound Throughput</name>
+            <title>Top 10 Interfaces by Inbound Throughput</title>
+            <verticallabel>bps</verticallabel>
+            <rigid>false</rigid>
+            <maxvalue>NaN</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>1</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <aggregated>false</aggregated>
+            <originId></originId>
+            <datapoints>
+        <overviewgraphdatapoint>
+            <name>InOctets</name>
+            <datapointname>InOctets</datapointname>
+            <cf>1</cf>
+            <aggregateMethod>sum</aggregateMethod>
+            <originId></originId>
+        </overviewgraphdatapoint>
+            </datapoints>
+            <virtualdatapoints>
+        <overviewgraphvirtualdatapoint>
+            <name>Ingress</name>
+            <rpn>InOctets*8</rpn>
+            <originId></originId>
+        </overviewgraphvirtualdatapoint>
+            </virtualdatapoints>
+            <lines>
+            <overviewgraphline>
+                <type>1</type>
+                <legend>##INSTANCE## - ##DSIDESCRIPTION##</legend>
+                <datapointname>Ingress</datapointname>
+                <isvirtualdatapoint>true</isvirtualdatapoint>
+                <color>silver</color>
+            </overviewgraphline>
+            </lines>
+        </overviewgraph>
+        <overviewgraph>
+            <name>Top 10 Interfaces by Outbound Throughput</name>
+            <title>Top 10 Interfaces by Outbound Throughput</title>
+            <verticallabel>bps</verticallabel>
+            <rigid>false</rigid>
+            <maxvalue>NaN</maxvalue>
+            <minvalue>0.0</minvalue>
+            <displayprio>2</displayprio>
+            <timescale>1day</timescale>
+            <base1024>false</base1024>
+            <aggregated>false</aggregated>
+            <originId></originId>
+            <datapoints>
+        <overviewgraphdatapoint>
+            <name>OutOctets</name>
+            <datapointname>OutOctets</datapointname>
+            <cf>1</cf>
+            <aggregateMethod>sum</aggregateMethod>
+            <originId></originId>
+        </overviewgraphdatapoint>
+            </datapoints>
+            <virtualdatapoints>
+        <overviewgraphvirtualdatapoint>
+            <name>Egress</name>
+            <rpn>OutOctets*8</rpn>
+            <originId></originId>
+        </overviewgraphvirtualdatapoint>
+            </virtualdatapoints>
+            <lines>
+            <overviewgraphline>
+                <type>1</type>
+                <legend>##INSTANCE## - ##DSIDESCRIPTION##</legend>
+                <datapointname>Egress</datapointname>
+                <isvirtualdatapoint>true</isvirtualdatapoint>
+                <color>silver</color>
+            </overviewgraphline>
+            </lines>
+        </overviewgraph>
+        </overviewgraphs>
+        <scripts>
+        </scripts>
+    </entry>
+</feed>

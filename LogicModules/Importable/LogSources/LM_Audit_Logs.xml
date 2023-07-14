@@ -1,0 +1,257 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<feed  version="1.0" hasPendingRequests="false" >
+  <company></company>
+  <status>200</status>
+  <errmsg>OK</errmsg>
+  <interval>0</interval>
+<entry type="prelogsource">
+<version>1687426069</version>
+<name>LM Audit Logs</name>
+<description>Queries LogicMonitor&#39;s API for Audit Logs and adds them to LM Logs</description>
+<group>LogicMonitor</group>
+<appliesto>hasCategory(&#34;LogicMonitorPortal&#34;) &#38;&#38; system.displayname =~ &#34;.logicmonitor.com&#34;</appliesto>
+<collector>scriptevent</collector>
+<tags></tags>
+<technology>This module requires the &#34;addCategory_LogicMonitorPortal&#34; PropertySource to be installed, a device with a hostname and displayname including &#34;logicmonitor.com&#34;, and the following properties configured:
+
+lmaccess.id - API Token ID
+lmaccess.key - API Token key
+lmaccount - (optional) Name of your LM account. This will default to whatever account this is running on.</technology>
+<collectionInterval>60</collectionInterval>
+<schemaVersion>1</schemaVersion>
+<registryVersion>1.0.0</registryVersion>
+<authorCompanyUuid>c07472c8-700b-4fe9-98a9-d77d487c3426</authorCompanyUuid>
+<currentUuid>eDppOdXEQ7iNwTJ0LH2T6g</currentUuid>
+<originalUuid>eDppOdXEQ7iNwTJ0LH2T6g</originalUuid>
+    <integrationMetadata>
+        <integrationVersion></integrationVersion>
+        <integrationAuthorCompanyUuid>c07472c8-700b-4fe9-98a9-d77d487c3426</integrationAuthorCompanyUuid>
+        <integrationLineageId>eDppOdXEQ7iNwTJ0LH2T6g</integrationLineageId>
+        <integrationChecksum></integrationChecksum>
+        <integrationAuthorNamespace>lmthomascoventrybrooker</integrationAuthorNamespace>
+        <integrationId></integrationId>
+        <integrationLocator></integrationLocator>
+        <integrationName></integrationName>
+        <integrationStatus></integrationStatus>
+        <integrationPublishedAtMS></integrationPublishedAtMS>
+        <integrationIsPrivate></integrationIsPrivate>
+    </integrationMetadata>
+<params>
+<prelogsourceparam>
+<name>scripttype</name>
+<value>embed</value>
+<comment></comment>
+</prelogsourceparam>
+<prelogsourceparam>
+<name>scriptgroovy</name>
+<value>/*******************************************************************************
+ * © 2007-2023 - LogicMonitor, Inc. All rights reserved.
+ ******************************************************************************/
+
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
+import org.apache.commons.codec.binary.Hex;
+import groovy.json.JsonSlurper
+import groovy.json.JsonOutput
+import groovy.json.JsonBuilder
+import com.santaba.agent.util.Settings
+
+
+// Import relevant properties from the device
+String apiId   = hostProps.get(&#34;lmaccess.id&#34;)  ?: hostProps.get(&#34;logicmonitor.access.id&#34;)
+String apiKey  = hostProps.get(&#34;lmaccess.key&#34;) ?: hostProps.get(&#34;logicmonitor.access.key&#34;)
+def portalName = hostProps.get(&#34;lmaccount&#34;)    ?: Settings.getSetting(Settings.AGENT_COMPANY)
+def pollInterval = taskProps.get(&#34;pollinterval&#34;) ?: 60 
+Map proxyInfo  = getProxyInfo()
+
+pollInterval = taskProps.get(&#34;pollinterval&#34;) ?: 60 //default value is 1 min in case poll interval not set.
+
+// Determine the time window from which to check logs
+def nowEpoch = System.currentTimeSeconds()
+
+def checkEpoch
+try {
+    scriptCache = this.class.classLoader.loadClass(&#34;com.santaba.agent.util.script.ScriptCache&#34;).getCache();
+    checkEpoch = scriptCache.get(&#34;${portalName}.auditLogSource.checkEpoch&#34;);
+    if(checkEpoch == null){
+        checkEpoch = (nowEpoch - pollInterval).toString()
+    }
+} catch (Exception ex) {
+    return 1
+}
+
+def auditLogsResponse = apiGetManyV2(portalName, apiId, apiKey, &#34;/setting/accesslogs&#34;, proxyInfo, [&#34;filter&#34;:&#34;happenedOn&#62;:${checkEpoch}&#34;])
+
+def json = [:];
+json[&#39;events&#39;] = [];
+
+auditLogsResponse.each{
+	event = [:]
+	event[&#39;message&#39;] = it.description.toString()
+	event[&#39;Timestamp&#39;] = it.happenedOn.toString()
+	event[&#39;happenedOnLocal&#39;] = it.happenedOnLocal
+	event[&#39;auditLogID&#39;] = it.id
+	event[&#39;auditLogIP&#39;] = it.ip
+	event[&#39;auditLogUsername&#39;] = it.username
+	json[&#39;events&#39;] &#60;&#60; event
+}
+
+// Did we get any new events?
+if (json[&#39;events&#39;].size &#62; 0) {
+    // Yes, convert the json map to a JSON string and print it as a pretty string
+    def prettyJsonString = JsonOutput.prettyPrint(JsonOutput.toJson(json))
+    println prettyJsonString
+}
+
+
+return 0
+
+/* Paginated GET method. Returns a list of objects. */
+List apiGetManyV2(portalName, apiId, apiKey, endPoint, proxyInfo, Map args=[:]) {
+
+    def pageSize = args.get(&#39;size&#39;, 1000) // Default the page size to 1000 if not specified.
+    List items = []
+
+    args[&#39;size&#39;] = pageSize
+
+    def pageCount = 0
+    while (true) {
+        pageCount += 1
+
+        // Updated the args
+        args[&#39;size&#39;] = pageSize
+        args[&#39;offset&#39;] = items.size()
+
+        def response = apiGetV2(portalName, apiId, apiKey, endPoint, proxyInfo, args)
+        if (response.get(&#34;errmsg&#34;, &#34;OK&#34;) != &#34;OK&#34;) {
+            throw new Exception(&#34;Santaba returned errormsg: ${response?.errmsg}&#34;)
+        }
+        items.addAll(response.items)
+
+        // If we recieved less than we asked for it means we are done
+        if (response.items.size() &#60; pageSize) break
+    }
+    return items
+}
+
+/* Simple GET, returns a parsed json payload. No processing. */
+def apiGetV2(portalName, apiId, apiKey, endPoint, proxyInfo, Map args=[:]) {
+    def request = rawGetV2(portalName, apiId, apiKey, endPoint, proxyInfo, args)
+    if (request.getResponseCode() == 200) {
+        def payload = new JsonSlurper().parseText(request.content.text)
+        return payload
+    }
+    else {
+        throw new Exception(&#34;Server return HTTP code ${request.getResponseCode()}&#34;)
+    }
+}
+
+/* Raw GET method. */
+def rawGetV2(portalName, apiId, apiKey, endPoint, proxyInfo, Map args=[:]) {
+    def auth = generateAuth(apiId, apiKey, endPoint)
+    def headers = [&#34;Authorization&#34;: auth, &#34;Content-Type&#34;: &#34;application/json&#34;, &#34;X-Version&#34;:&#34;3&#34;, &#34;External-User&#34;:&#34;true&#34;]
+    def url = &#34;https://${portalName}.logicmonitor.com/santaba/rest${endPoint}&#34;
+
+    if (args) {
+        def encodedArgs = []
+        args.each{ k,v -&#62;
+            encodedArgs &#60;&#60; &#34;${k}=${java.net.URLEncoder.encode(v.toString(), &#34;UTF-8&#34;)}&#34;
+        }
+        url += &#34;?${encodedArgs.join(&#39;&#38;&#39;)}&#34;
+    }
+
+    def request
+    if (proxyInfo.enabled) {
+        request = url.toURL().openConnection(proxyInfo.proxy)
+    }
+    else {
+        request = url.toURL().openConnection()
+    }
+    request.setRequestMethod(&#34;GET&#34;)
+    request.setDoOutput(true)
+    headers.each{ k,v -&#62;
+        request.addRequestProperty(k, v)
+    }
+
+    return request
+}
+
+/* Generate auth for API calls. */
+static String generateAuth(id, key, path) {
+    Long epoch_time = System.currentTimeMillis()
+    Mac hmac = Mac.getInstance(&#34;HmacSHA256&#34;)
+    hmac.init(new SecretKeySpec(key.getBytes(), &#34;HmacSHA256&#34;))
+    def signature = Hex.encodeHexString(hmac.doFinal(&#34;GET${epoch_time}${path}&#34;.getBytes())).bytes.encodeBase64()
+
+    return &#34;LMv1 ${id}:${signature}:${epoch_time}&#34;
+}
+
+/**
+* Get collector proxy settings
+* @return Map with proxy settings, empty map if proxy not set.
+*/
+Map getProxyInfo() {
+    // Each property must be evaluated for null to determine whether to use collected value or fallback value
+    // Elvis operator does not play nice with booleans
+    // default to true in absence of property to use collectorProxy as determinant
+    Boolean deviceProxy = hostProps.get(&#34;proxy.enable&#34;)?.toBoolean()
+    deviceProxy = (deviceProxy != null) ? deviceProxy : true  
+    // if settings are not present, value should be false
+    Boolean collectorProxy = Settings.getSetting(&#34;proxy.enable&#34;)?.toBoolean()
+    collectorProxy = (collectorProxy != null) ? collectorProxy : false  
+
+    Map proxyInfo = [:]
+    
+    if (deviceProxy &#38;&#38; collectorProxy) {
+        proxyInfo = [
+            enabled : true,
+            host : hostProps.get(&#34;proxy.host&#34;) ?: Settings.getSetting(&#34;proxy.host&#34;),
+            port : hostProps.get(&#34;proxy.port&#34;) ?: Settings.getSetting(&#34;proxy.port&#34;) ?: 3128,
+            user : Settings.getSetting(&#34;proxy.user&#34;),
+            pass : Settings.getSetting(&#34;proxy.pass&#34;)
+        ]
+    
+        proxyInfo[&#34;proxy&#34;] = new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyInfo.host, proxyInfo.port.toInteger()))
+    }
+
+    return proxyInfo
+}</value>
+<comment></comment>
+</prelogsourceparam>
+<prelogsourceparam>
+<name>windowsscript</name>
+<value></value>
+<comment></comment>
+</prelogsourceparam>
+<prelogsourceparam>
+<name>linuxscript</name>
+<value></value>
+<comment></comment>
+</prelogsourceparam>
+<prelogsourceparam>
+<name>windowscmdline</name>
+<value></value>
+<comment></comment>
+</prelogsourceparam>
+<prelogsourceparam>
+<name>linuxcmdline</name>
+<value></value>
+<comment></comment>
+</prelogsourceparam>
+</params>
+<filters>
+</filters>
+        <scripts>
+        </scripts>
+<logFields>
+</logFields>
+<resourcemappings>
+<prelogsourceresourcemapping>
+<key>system.deviceid</key>
+<value>##system.deviceid##</value>
+<method>Token</method>
+<comment></comment>
+</prelogsourceresourcemapping>
+</resourcemappings>
+</entry>
+</feed>
