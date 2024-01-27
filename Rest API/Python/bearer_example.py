@@ -18,7 +18,6 @@ queryParams = '?fields=id,displayName'
 # Construct URL
 url = 'https://' + portal + '.logicmonitor.com/santaba/rest' + \
     resourcePath + queryParams
-print(url)
 
 # Construct headers
 auth = 'bearer ' + bearer
@@ -28,5 +27,6 @@ headers = {'Content-Type': 'application/json',
 # Make request
 response = requests.get(url, headers=headers, verify=True)
 response_json = response.json()
+
 # Print response
 print(str(response_json))
