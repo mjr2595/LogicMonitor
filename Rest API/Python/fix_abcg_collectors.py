@@ -1,10 +1,14 @@
 #!/usr/bin/python
 
+import os
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Account Info
-portal = ''
-bearer = ''
+portal = os.getenv("PORTAL")
+bearer = os.getenv("BEARER")
 auth = 'bearer ' + bearer
 headers = {'Content-Type': 'application/json',
            'X-version': '3', 'Authorization': auth}

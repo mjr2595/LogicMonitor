@@ -1,18 +1,21 @@
 from __future__ import print_function
-import time
+import os
 import logicmonitor_sdk
+from dotenv import load_dotenv
 from logicmonitor_sdk.rest import ApiException
 from pprint import pprint
 
+load_dotenv()
 
 # Configure API key authorization: LMv1
 configuration = logicmonitor_sdk.Configuration()
-configuration.company = 'COMPANY_NAME'
-configuration.access_id = 'API_ACCESS_ID'
-configuration.access_key = 'API_ACCESS_KEY'
+configuration.company = os.getenv("PORTAL")
+configuration.auth_type = 'Bearer'
+configuration.bearer_token = os.getenv("BEARER")
 
 # create an instance of the API class
-api_instance = logicmonitor_sdk.LMApi(logicmonitor_sdk.ApiClient(configuration))
+api_instance = logicmonitor_sdk.LMApi(
+    logicmonitor_sdk.ApiClient(configuration))
 
 try:
     # get alert list
