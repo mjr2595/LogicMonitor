@@ -1,16 +1,19 @@
 #!/usr/bin/python
 
+import os
 import requests
-import json
+from dotenv import load_dotenv
+
+load_dotenv()  # take environment variables from .env
 
 # Account Info
-portal = 'portalname'
-bearer = 'lmb_xxx'
+portal = os.getenv("PORTAL")
+bearer = os.getenv("BEARER")
 
 # Request Info: Get all devices
 httpVerb = 'GET'
 resourcePath = '/device/devices'
-queryParams = ''
+queryParams = '?fields=id,displayName'
 
 # Construct URL
 url = 'https://' + portal + '.logicmonitor.com/santaba/rest' + \
@@ -24,7 +27,6 @@ headers = {'Content-Type': 'application/json',
 
 # Make request
 response = requests.get(url, headers=headers, verify=True)
-
-# Print status of response and save response body to file
-print(f"Response Status: {response.status_code}")
-print(f"Response Content: {response.content}")
+response_json = response.json()
+# Print response
+print(str(response_json))
