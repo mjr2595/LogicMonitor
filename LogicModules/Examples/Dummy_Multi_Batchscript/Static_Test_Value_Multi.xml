@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<feed  version="1.0" hasPendingRequests="false" >
+  <company></company>
+  <status>200</status>
+  <errmsg>OK</errmsg>
+  <interval>0</interval>
+  <kmsKeyId></kmsKeyId>
+  <pkdsRegion></pkdsRegion>
+    <entry type="predatasource">
+        <version>1708040532</version>
+        <name>Static_Test_Value_Multi</name>
+        <displayedas>Static Test Value Multi</displayedas>
+        <description>Dummy Multi-Instance DataSource for testing stuff</description>
+        <collector>batchscript</collector>
+        <hasMultiInstances>true</hasMultiInstances>
+        <useWildValueAsUniqueIdentifier>false</useWildValueAsUniqueIdentifier>
+        <schedule>60</schedule>
+        <appliesTo>isDevice()</appliesTo>
+        <wildcardauto>true</wildcardauto>
+        <wildcardpersist>true</wildcardpersist>
+        <wildcardlinuxscript>ad_script</wildcardlinuxscript>
+        <wildcardlinuxcmdline>type=&#34;embeded&#34; </wildcardlinuxcmdline>
+        <wildcardwinscript>ad_script</wildcardwinscript>
+        <wildcardwincmdline>type=&#34;embeded&#34; </wildcardwincmdline>
+        <wildcardgroovyscript>println &#34;instance1_value##instance1_alias##instance1_description&#34;
+println &#34;instance2_value##instance2_alias##instance2_description&#34;
+println &#34;instance3_value##instance3_alias##instance3_description&#34;
+println &#34;instance4_value##instance4_alias##instance4_description&#34;</wildcardgroovyscript>
+        <wildcardschedule>60</wildcardschedule>
+        <wildcarddisable>false</wildcarddisable>
+        <wildcarddeleteinactive>true</wildcarddeleteinactive>
+        <agdmethod>none</agdmethod>
+        <agdparams></agdparams>
+        <group>LMTest</group>
+        <tags></tags>
+        <technology>Uses examples from the following support pages:
+
+https://www.logicmonitor.com/support/logicmodules/datasources/active-discovery/script-active-discovery
+
+https://www.logicmonitor.com/support/logicmodules/datasources/data-collection-methods/batchscript-data-collection</technology>
+        <adlist><![CDATA[{"agdmethod":"none","method":"ad_script","agdparams":"","locatorId":"","id":0,"filters":[],"params":{"type":"embeded","groovyscript":"println \"instance1_value##instance1_alias##instance1_description\"\nprintln \"instance2_value##instance2_alias##instance2_description\"\nprintln \"instance3_value##instance3_alias##instance3_description\"\nprintln \"instance4_value##instance4_alias##instance4_description\""},"version":""}]]></adlist>
+        <schemaVersion>2</schemaVersion>
+        <dataSourceType>1</dataSourceType>
+        <attributes>
+        <attribute>
+            <name>scripttype</name>
+            <value>embed</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>scriptgroovy</name>
+            <value>// datapoint1
+println &#34;instance1_value.key1=11&#34;
+println &#34;instance2_value.key1=21&#34;
+println &#34;instance3_value.key1=31&#34;
+println &#34;instance4_value.key1=41&#34;
+
+// datapoint2
+println &#34;instance1_value.key2=12&#34;
+println &#34;instance2_value.key2=22&#34;
+println &#34;instance3_value.key2=32&#34;
+println &#34;instance4_value.key2=42&#34;
+
+// JSON equivalent
+/*
+{
+  data: {
+    instance1_value: {
+      values: {
+        &#34;key1&#34;: 11,
+        &#34;key2&#34;: 12
+      }
+    },
+    instance2_value: {
+      values: {
+        &#34;key1&#34;: 21,
+        &#34;key2&#34;: 22
+      }
+    },
+    instance3_value: {
+      values: {
+        &#34;key1&#34;: 31,
+        &#34;key2&#34;: 32
+      }
+    },
+    instance4_value: {
+      values: {
+        &#34;key1&#34;: 41,
+        &#34;key2&#34;: 42
+      }
+    }
+  }
+}
+*/</value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>windowsscript</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>linuxscript</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>windowscmdline</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        <attribute>
+            <name>linuxcmdline</name>
+            <value></value>
+            <comment></comment>
+        </attribute>
+        </attributes>
+        <datapoints>
+        <datapoint>
+            <name>datapoint1</name>
+            <originId>OCJLAasKQF2u6i6bqietZg</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.key1</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description></description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        <datapoint>
+            <name>datapoint2</name>
+            <originId>eBnDIJ2eRS-v5SbQfqkhVg</originId>
+            <dataType>7</dataType>
+            <type>2</type>
+            <postprocessormethod>namevalue</postprocessormethod>
+            <postprocessorparam>##WILDVALUE##.key2</postprocessorparam>
+            <usevalue>output</usevalue>
+            <alertexpr></alertexpr>
+            <alertmissing>1</alertmissing>
+            <alertsubject></alertsubject>
+            <alertbody></alertbody>
+            <enableanomalyalertsuppression></enableanomalyalertsuppression>
+            <adadvsettingenabled>false</adadvsettingenabled>
+            <warnadadvsetting></warnadadvsetting>
+            <erroradadvsetting></erroradadvsetting>
+            <criticaladadvsetting></criticaladadvsetting>
+            <description></description>
+            <maxvalue></maxvalue>
+            <minvalue></minvalue>
+            <maxdigits>4</maxdigits>
+            <userparam1></userparam1>
+            <userparam2></userparam2>
+            <userparam3></userparam3>
+            <iscomposite>false</iscomposite>
+            <rpn></rpn>
+            <alertTransitionIval>0</alertTransitionIval>
+            <alertClearTransitionIval>0</alertClearTransitionIval>
+        </datapoint>
+        </datapoints>
+        <graphs>
+        </graphs>
+        <overviewgraphs>
+        </overviewgraphs>
+        <scripts>
+        </scripts>
+    </entry>
+</feed>
