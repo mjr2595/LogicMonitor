@@ -3,6 +3,7 @@
 import os
 import requests
 from dotenv import load_dotenv
+from pprint import pprint
 
 load_dotenv()  # take environment variables from .env
 
@@ -29,4 +30,4 @@ response = requests.get(url, headers=headers, verify=True)
 response_json = response.json()
 
 # Print response
-print(str(response_json))
+pprint(str(response_json))
