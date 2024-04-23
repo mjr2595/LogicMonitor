@@ -1,11 +1,11 @@
 {
-  "santabaRelease": 169,
+  "santabaRelease": 203,
   "widgetTokens": [{
     "name": "defaultResourceGroup",
-    "value": "Presidio/Internal/Collectors"
+    "value": "Devices by Type/Collectors"
   }],
   "name": "Collectors - Global",
-  "description": "Monitoring for Windows Collectors in SITENAME ABCG",
+  "description": "A bit more in-depth than the OOTB Collector dashboard",
   "overwriteGroupFields": false,
   "widgetsConfigVersion": 2,
   "type": "dashboard",
@@ -246,6 +246,7 @@
           "sdted": "all",
           "chain": "",
           "instance": "",
+          "anomaly": "all",
           "dataPoint": "",
           "rule": "",
           "acked": "all",
