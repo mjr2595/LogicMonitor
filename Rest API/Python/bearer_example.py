@@ -1,9 +1,10 @@
 #!/usr/bin/python
 
 import os
+from pprint import pprint
+
 import requests
 from dotenv import load_dotenv
-from pprint import pprint
 
 load_dotenv()  # take environment variables from .env
 
@@ -14,11 +15,14 @@ bearer = os.getenv("BEARER")
 # Request Info: Get all devices
 httpVerb = 'GET'
 resourcePath = '/device/devices'
-queryParams = '?fields=id,displayName'
+
+# Dynamic queryParams
+size = 1
+offset = 0
+queryParams = f'?fields=id,displayName&size={size}&offset={offset}'
 
 # Construct URL
-url = 'https://' + portal + '.logicmonitor.com/santaba/rest' + \
-    resourcePath + queryParams
+url = f'https://{portal}.logicmonitor.com/santaba/rest{resourcePath}{queryParams}'
 
 # Construct headers
 auth = 'bearer ' + bearer
@@ -26,7 +30,7 @@ headers = {'Content-Type': 'application/json',
            'X-version': '3', 'Authorization': auth}
 
 # Make request
-response = requests.get(url, headers=headers, verify=True)
+response = requests.get(url, headers=headers, verify=True, timeout=15)
 response_json = response.json()
 
 # Print response
