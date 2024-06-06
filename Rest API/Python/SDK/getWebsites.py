@@ -17,12 +17,14 @@ configuration.bearer_token = os.getenv("BEARER")
 api_instance = logicmonitor_sdk.LMApi(
     logicmonitor_sdk.ApiClient(configuration))
 
-fields = "id"
-size = 2
+fields = "name,type,testLocation"
+size = 1
+offset = 0
 
 try:
     # get alert list
-    api_response = api_instance.get_device_list()
+    api_response = api_instance.get_website_list(
+        size=size, offset=offset, fields=fields)
     pprint(api_response)
 except ApiException as e:
-    print("Exception when calling LMApi->getAlertList: %s\n" % e)
+    print("Exception when calling LMApi->get_website_list: %s\n" % e)

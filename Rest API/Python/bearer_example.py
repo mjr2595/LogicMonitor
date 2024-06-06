@@ -17,9 +17,10 @@ httpVerb = 'GET'
 resourcePath = '/device/devices'
 
 # Dynamic queryParams
+fields = "id,displayName"
 size = 1
 offset = 0
-queryParams = f'?fields=id,displayName&size={size}&offset={offset}'
+queryParams = f'?fields={fields}&size={size}&offset={offset}'
 
 # Construct URL
 url = f'https://{portal}.logicmonitor.com/santaba/rest{resourcePath}{queryParams}'
