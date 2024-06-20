@@ -29,7 +29,7 @@ var epoch = new Date().getTime();
 var request_vars =
   http_verb == "GET" || http_verb == "DELETE"
     ? http_verb + epoch + resource_path
-    : http_verb + epoch + pm.request.data + resource_path;
+    : http_verb + epoch + pm.request.body + resource_path;
 
 // Generate the signature and build the Auth header
 var signature = btoa(cjs.HmacSHA256(request_vars, api_key).toString());
