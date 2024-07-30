@@ -1,0 +1,41 @@
+{
+  "extends": "recommended",
+  "rules": {
+    "CompileStatic": {
+      "enabled": false
+    },
+    "DuplicateNumberLiteral": {
+      "enabled": false
+    },
+    "DuplicateStringLiteral": {
+      "enabled": false
+    },
+    "Indentation": {
+      "enabled": false
+    },
+    "MethodParameterTypeRequired": {
+      "enabled": false
+    },
+    "MethodReturnTypeRequired": {
+      "enabled": false
+    },
+    "NoDef": {
+      "enabled": false
+    },
+    "StaticMethodsBeforeInstanceMethods": {
+      "enabled": false
+    },
+    "ThrowException": {
+      "enabled": false
+    },
+    "UnnecessaryGetter": {
+      "enabled": false
+    },
+    "UnnecessarySetter": {
+      "enabled": false
+    },
+    "VariableTypeRequired": {
+      "enabled": false
+    }
+  }
+}
