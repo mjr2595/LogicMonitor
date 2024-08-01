@@ -1,0 +1,58 @@
+{
+  "collectionMethod": "script",
+  "datapoints": [
+    {
+      "originId": "GYF0z2-BREStM1rSkehHkw",
+      "useValue": "exitCode",
+      "min": "",
+      "max": "",
+      "triggerInterval": 0,
+      "dataType": 4,
+      "name": "status",
+      "maxDigits": 4,
+      "interpretMethod": "none",
+      "noData": "Do not trigger an alert",
+      "type": "gauge",
+      "clearInterval": 0
+    }
+  ],
+  "searchKeywords": "",
+  "displayedAs": "Ingest Test",
+  "description": "Test DS using the LM Logs Ingestion API",
+  "appliesTo": "hasCategory(\"LogicMonitorPortal\") && system.displayname =~ \".logicmonitor.com\"",
+  "collectionAttrs": {
+    "type": "groovy",
+    "content": "import org.apache.commons.codec.binary.Hex\nimport org.apache.http.client.methods.HttpPost\nimport org.apache.http.entity.ContentType\nimport org.apache.http.entity.StringEntity\nimport org.apache.http.impl.client.CloseableHttpClient\nimport org.apache.http.impl.client.HttpClients\nimport org.apache.http.util.EntityUtils\nimport javax.crypto.Mac\nimport javax.crypto.spec.SecretKeySpec\n\ndef debug = false\n\n//define credentials and url\ndef accessId = hostProps.get('lmaccess.id') ?: hostProps.get('logicmonitor.access.id')\ndef accessKey = hostProps.get('lmaccess.key') ?: hostProps.get('logicmonitor.access.key')\ndef account = hostProps.get('lmaccount') ?: Settings.getSetting(Settings.AGENT_COMPANY)\ndef deviceId = hostProps.get('system.deviceId')\n\ndef resourcePath = \"/log/ingest\"\ndef url = \"https://\" + account + \".logicmonitor.com/rest\" + resourcePath\n\ndef data = \"\"\"\n[\n  {\n    \"msg\": \"Test Ingest from DS\",\n    \"_lm.resourceId\": {\n      \"system.deviceId\": \"${deviceId}\"\n    }\n  }\n]\n\"\"\"\n\nStringEntity params = new StringEntity(data, ContentType.APPLICATION_JSON)\nepoch = System.currentTimeMillis()\nrequestVars = \"POST\" + epoch + data + resourcePath\n\n// construct signature\nhmac = Mac.getInstance(\"HmacSHA256\")\nsecret = new SecretKeySpec(accessKey.getBytes(), \"HmacSHA256\")\nhmac.init(secret)\nhmac_signed = Hex.encodeHexString(hmac.doFinal(requestVars.getBytes()))\nsignature = hmac_signed.bytes.encodeBase64()\n\n// HTTP Post\nCloseableHttpClient httpclient = HttpClients.createDefault()\nhttp_request = new HttpPost(url)\nhttp_request.setHeader(\"Authorization\", \"LMv1 \" + accessId + \":\" + signature + \":\" + epoch)\nhttp_request.setHeader(\"Accept\", \"application/json\")\nhttp_request.setHeader(\"Content-type\", \"application/json\")\nhttp_request.setHeader(\"X-version\", \"3\")\nhttp_request.setEntity(params)\nresponse = httpclient.execute(http_request)\nresponseBody = EntityUtils.toString(response.getEntity())\ncode = response.getStatusLine().getStatusCode()\n\n// Debug Info\nif (debug) {\n    println \"Signature: \" + signature\n    println \"URL: \" + url\n    println \"Data: \" + data\n    println \"Response: \" + responseBody\n    println \"Status: \" + code\n}\n\nhttpclient.close()\n\nreturn code == 202 ? 0 : 1"
+  },
+  "type": 0,
+  "technicalNotes": "",
+  "useWildValueAsUniqueIdentifier": false,
+  "version": 1722537871,
+  "registryMetadata": {
+    "currentUuid": "QnZPW0VARsK0PU9G3KkJ4A",
+    "originalUuid": "QnZPW0VARsK0PU9G3KkJ4A",
+    "locatorId": "",
+    "authorCompanyUuid": "da4f149b-0b4f-4f00-b337-ce38f0c413c0",
+    "registryVersion": "1.0.0",
+    "checksum": "50f439fa9c330a70bc2520988c8aa1ad",
+    "namespace": "",
+    "registryId": ""
+  },
+  "multiInstance": false,
+  "name": "Ingest_Test",
+  "collectionInterval": "3m",
+  "dataSourceType": 1,
+  "group": "",
+  "headers": {
+    "cache-control": "no-cache, no-store",
+    "content-disposition": "attachment; filename=\"Ingest_Test.json\"",
+    "content-encoding": "gzip",
+    "content-type": "application/json",
+    "date": "Thu, 01 Aug 2024 18:54:33 GMT",
+    "server": "LM",
+    "strict-transport-security": "max-age=31536000; includeSubDomains",
+    "vary": "accept-encoding",
+    "x-content-type-options": "nosniff",
+    "x-server-version": "208-4"
+  }
+}
