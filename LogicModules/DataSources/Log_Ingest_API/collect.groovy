@@ -55,7 +55,6 @@ code = response.getStatusLine().getStatusCode()
 
 // Debug Info
 if (debug) {
-  println 'Signature: ' + signature
   println 'URL: ' + url
   println 'Data: ' + data
   println 'Response: ' + responseBody
