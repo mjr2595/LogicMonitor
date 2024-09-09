@@ -1,7 +1,7 @@
 import groovy.time.*
 
 hostname = hostProps.get("system.hostname");
-ports = 80
+ports = [443, 80, 22]
 
 def startTime = new Date()
 
