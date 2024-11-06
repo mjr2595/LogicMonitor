@@ -1,0 +1,254 @@
+{
+    "LMApiVersion": "3",
+    "appliesTo": "isDevice()",
+    "auditVersion": 0,
+    "autoDiscoveryConfig": null,
+    "collectInterval": 3600,
+    "collectMethod": "script",
+    "collectorAttribute": {
+        "groovyScript": "collect",
+        "linuxCmdline": "",
+        "linuxScript": "",
+        "manualConnections": null,
+        "name": "script",
+        "properties": null,
+        "scriptType": "embed",
+        "windowsCmdline": "",
+        "windowsScript": ""
+    },
+    "coretools_format": "ds meV1",
+    "dataPoints": [
+        {
+            "adAdvSettingEnabled": false,
+            "alertBody": "",
+            "alertClearTransitionInterval": 0,
+            "alertExpr": "",
+            "alertExprNote": "",
+            "alertForNoData": 1,
+            "alertSubject": "",
+            "alertTransitionInterval": 0,
+            "dataType": 7,
+            "description": "",
+            "enableAnomalyAlertSuppression": "",
+            "maxDigits": 4,
+            "maxValue": "",
+            "minValue": "",
+            "name": "followersCount",
+            "postProcessorMethod": "namevalue",
+            "postProcessorParam": "followersCount",
+            "rawDataFieldName": "output",
+            "type": 2,
+            "userParam1": "",
+            "userParam2": "",
+            "userParam3": ""
+        },
+        {
+            "adAdvSettingEnabled": false,
+            "alertBody": "",
+            "alertClearTransitionInterval": 0,
+            "alertExpr": "",
+            "alertExprNote": "",
+            "alertForNoData": 1,
+            "alertSubject": "",
+            "alertTransitionInterval": 0,
+            "dataType": 7,
+            "description": "",
+            "enableAnomalyAlertSuppression": "",
+            "maxDigits": 4,
+            "maxValue": "",
+            "minValue": "",
+            "name": "followsCount",
+            "postProcessorMethod": "namevalue",
+            "postProcessorParam": "followsCount",
+            "rawDataFieldName": "output",
+            "type": 2,
+            "userParam1": "",
+            "userParam2": "",
+            "userParam3": ""
+        },
+        {
+            "adAdvSettingEnabled": false,
+            "alertBody": "",
+            "alertClearTransitionInterval": 0,
+            "alertExpr": "",
+            "alertExprNote": "",
+            "alertForNoData": 1,
+            "alertSubject": "",
+            "alertTransitionInterval": 0,
+            "dataType": 7,
+            "description": "",
+            "enableAnomalyAlertSuppression": "",
+            "maxDigits": 4,
+            "maxValue": "",
+            "minValue": "",
+            "name": "postsCount",
+            "postProcessorMethod": "namevalue",
+            "postProcessorParam": "postsCount",
+            "rawDataFieldName": "output",
+            "type": 2,
+            "userParam1": "",
+            "userParam2": "",
+            "userParam3": ""
+        },
+        {
+            "adAdvSettingEnabled": false,
+            "alertBody": "",
+            "alertClearTransitionInterval": 0,
+            "alertExpr": "",
+            "alertExprNote": "",
+            "alertForNoData": 1,
+            "alertSubject": "",
+            "alertTransitionInterval": 0,
+            "dataType": 4,
+            "description": "",
+            "enableAnomalyAlertSuppression": "",
+            "maxDigits": 4,
+            "maxValue": "",
+            "minValue": "",
+            "name": "success",
+            "postProcessorMethod": "none",
+            "postProcessorParam": "",
+            "rawDataFieldName": "exitCode",
+            "type": 2,
+            "userParam1": "",
+            "userParam2": "",
+            "userParam3": ""
+        }
+    ],
+    "description": "Grabs some basic data for a given bluesky profile. ",
+    "displayName": "Bluesky Profile Info",
+    "enableAutoDiscovery": false,
+    "enableEriDiscovery": false,
+    "eriDiscoveryConfig": null,
+    "eriDiscoveryInterval": -1,
+    "graphs": [
+        {
+            "base1024": false,
+            "dataPoints": [
+                {
+                    "consolidateFunc": 1,
+                    "dpName": "followersCount",
+                    "name": "followers"
+                }
+            ],
+            "displayPrio": 1,
+            "height": 120,
+            "lines": [
+                {
+                    "colorName": "Auto",
+                    "dataPointName": "followers",
+                    "isVirtualDataPoint": false,
+                    "legend": "followers",
+                    "type": 1
+                }
+            ],
+            "maxValue": "NaN",
+            "minValue": "NaN",
+            "name": "Followers Count",
+            "rigid": false,
+            "timeScale": "1day",
+            "title": "Followers Count",
+            "verticalLabel": "followers",
+            "virtualDataPoints": [],
+            "width": 360
+        },
+        {
+            "base1024": false,
+            "dataPoints": [
+                {
+                    "consolidateFunc": 1,
+                    "dpName": "followsCount",
+                    "name": "follows"
+                }
+            ],
+            "displayPrio": 1,
+            "height": 120,
+            "lines": [
+                {
+                    "colorName": "Auto",
+                    "dataPointName": "follows",
+                    "isVirtualDataPoint": false,
+                    "legend": "follows",
+                    "type": 1
+                }
+            ],
+            "maxValue": "NaN",
+            "minValue": "NaN",
+            "name": "Number of Follows",
+            "rigid": false,
+            "timeScale": "1day",
+            "title": "Number of Follows",
+            "verticalLabel": "follows",
+            "virtualDataPoints": [],
+            "width": 360
+        },
+        {
+            "base1024": false,
+            "dataPoints": [
+                {
+                    "consolidateFunc": 1,
+                    "dpName": "postsCount",
+                    "name": "postsCount"
+                }
+            ],
+            "displayPrio": 1,
+            "height": 120,
+            "lines": [
+                {
+                    "colorName": "Auto",
+                    "dataPointName": "postsCount",
+                    "isVirtualDataPoint": false,
+                    "legend": "posts",
+                    "type": 1
+                }
+            ],
+            "maxValue": "NaN",
+            "minValue": "NaN",
+            "name": "Number of Posts",
+            "rigid": false,
+            "timeScale": "1day",
+            "title": "Number of Posts",
+            "verticalLabel": "posts",
+            "virtualDataPoints": [],
+            "width": 360
+        },
+        {
+            "base1024": false,
+            "dataPoints": [
+                {
+                    "consolidateFunc": 1,
+                    "dpName": "success",
+                    "name": "success"
+                }
+            ],
+            "displayPrio": 1,
+            "height": 120,
+            "lines": [
+                {
+                    "colorName": "Auto",
+                    "dataPointName": "success",
+                    "isVirtualDataPoint": false,
+                    "legend": "code",
+                    "type": 1
+                }
+            ],
+            "maxValue": "NaN",
+            "minValue": "NaN",
+            "name": "Success",
+            "rigid": false,
+            "timeScale": "1day",
+            "title": "Success",
+            "verticalLabel": "code",
+            "virtualDataPoints": [],
+            "width": 360
+        }
+    ],
+    "group": "",
+    "hasMultiInstances": true,
+    "name": "Bluesky_Profile_Info",
+    "overviewgraphs": [],
+    "payloadVersion": 0,
+    "tags": "api,http",
+    "technology": "Set wildvalue to profile name (no @)\nAPI ref: https://docs.bsky.app/docs/api/app-bsky-actor-get-profile",
+    "useWildValueAsUUID": false
+}
