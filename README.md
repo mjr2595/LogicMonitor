@@ -1,12 +1,15 @@
 # LogicMonitor
 
 ## About LM Blurb
+
 LogicMonitor is the leading SaaS-based unified observability and IT operations data collaboration platform for enterprise IT and managed service providers. Gain IT insights, seamless data collaboration at scale, and visibility into networks, cloud, applications, servers, log data and more within one unified platform.
 
 ## About this Repo
-This repo is for helpful scripts, modules, and dashboards for use within the LogicMonitor Platform.
 
-___
+This repo is for helpful scripts, modules, and dashboards for use within the LogicMonitor Platform.
+Not all, but most Python scripts will need to run within an environment that has modules in `requirements.txt` installed. You will also want to copy `.env.example` to a new `.env` file and fill in the necessary information. Be sure to add `.env` to your `.gitignore` file!
+
+---
 
 > ## Disclaimer
 >
@@ -16,4 +19,4 @@ ___
 >
 > I did not create every script in this repository and do not claim all scripts as my own. If you are the creator of a script and wish it to be removed let me know and I will remove the script.
 
-___
+---
