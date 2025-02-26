@@ -15,7 +15,7 @@ if (useJSCH) {
 }
 
 // open the ssh connection
-def cli = Expect.open(hostname, port, nimuser, nimpass, timeout, "lib=${lib}")
+def cli = Expect.open(hostname, port, user, pass, timeout, "lib=${lib}")
 
 sleep(1000)
 
