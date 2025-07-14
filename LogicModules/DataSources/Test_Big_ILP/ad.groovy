@@ -14,11 +14,13 @@ def ilp = [
 //def ilp2 = randomString(24500)
 //def ilp3 = randomString(16500)
 
+def ilp_truncated = emit.truncateToLimit(ilp)
+
 for (int i = 1; i <= 4; i++) {
     def wildvalue = "instance${i}_value"
     def wildalias = "instance${i}_alias"
     def description = "instance${i}_description"
-    emit.instance(wildvalue, wildalias, description, ilp)
+    emit.instance(wildvalue, wildalias, description, ilp_truncated)
     //println("${wildvalue}##${wildalias}##${description}####a=${ilp1}&b=${ilp2}")
     //println("${wildvalue}##${wildalias}##${description}####a=${ilp1}&b=${ilp2}&c=${ilp3}")
 }
